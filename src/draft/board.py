@@ -20,8 +20,12 @@ from pathlib import Path
 
 import pandas as pd
 
+# `player_id` is the *Sleeper* id, because that is what the live draft feed
+# returns and what the monitor matches on. `player_key` is the canonical
+# gsis-anchored id (src/ingest/player_ids.py) that everything else joins on.
+# They are both here on purpose; neither one can do the other's job.
 BOARD_COLUMNS = [
-    "rank", "player_id", "player_name", "position", "nfl_team",
+    "rank", "player_id", "player_key", "player_name", "position", "nfl_team",
     "projection", "projection_calibrated", "vorp", "replacement_points",
     "adp_rank", "adp_delta", "injury_status", "available",
     "bye_week", "blend_components_used",
@@ -160,7 +164,19 @@ def _render_html(board: pd.DataFrame, meta: dict) -> str:
   .TE{{color:var(--pos-te)}} .K{{color:var(--pos-k)}} .DEF{{color:var(--pos-def)}}
   .up{{color:var(--good)}} .dn{{color:var(--bad)}}
   .nm{{font-weight:600;cursor:pointer}}
+  .meta{{color:var(--muted);font-size:11px;letter-spacing:.02em}}
+  .inj{{color:var(--bad);font-weight:600}}
+  /* Everyone still on the board is at worst a game-time decision — the
+     genuinely unavailable were filtered out upstream. A late-August
+     "Questionable" is paperwork, so it stays grey and does not shout. */
+  .inj.soft{{color:var(--muted);font-weight:400}}
   .hint{{padding:10px 16px;color:var(--muted);font-size:12px}}
+  /* On a phone the projection column is the first thing to go: VORP already
+     carries it, and ADP and the delta are what you actually compare. */
+  @media (max-width:430px) {{
+    th,td{{padding:8px 6px}}
+    th:nth-child(7),td:nth-child(7){{display:none}}
+  }}
 </style></head><body>
 <header>
   <h1>Draft Board</h1>
@@ -177,7 +193,7 @@ def _render_html(board: pd.DataFrame, meta: dict) -> str:
 <div class="wrap"><table>
 <thead><tr>
   <th class="l">#</th><th class="l">Player</th><th class="l">Pos</th>
-  <th class="l">Tm</th><th>VORP</th><th>Proj</th><th>ADP</th><th>Δ</th><th class="l">Note</th>
+  <th>VORP</th><th>ADP</th><th>Δ</th><th>Proj</th>
 </tr></thead><tbody id="tb"></tbody></table></div>
 <script>
 const DATA = {payload};
@@ -204,17 +220,26 @@ function render() {{
     const d = Number(r.adp_delta);
     const dc = !isFinite(d) || r.adp_delta === '' ? '' : (d > 0 ? 'up' : d < 0 ? 'dn' : '');
     const ds = !isFinite(d) || r.adp_delta === '' ? '—' : (d > 0 ? '+' + d : d);
-    const note = r.injury_status ? String(r.injury_status) : '';
+    // Team, bye and injury ride under the name instead of taking three more
+    // columns. On a 375px phone the columns that decide a pick — VORP, ADP and
+    // the gap between them — have to be visible without scrolling sideways.
+    const bits = [r.nfl_team || '—'];
+    if (num(r.bye_week, 0) !== '—') bits.push('bye ' + num(r.bye_week, 0));
+    const sub = bits.join(' · ');
+    const soft = String(r.injury_status) === 'Questionable' ? ' soft' : '';
+    const inj = r.injury_status
+      ? ` <span class="inj${{soft}}">${{r.injury_status}}</span>` : '';
     return `<tr class="${{taken.has(id) ? 'taken' : ''}}" data-id="${{id}}">
       <td class="l">${{r.rank}}</td>
-      <td class="l nm">${{r.player_name}}</td>
+      <td class="l">
+        <div class="nm">${{r.player_name}}</div>
+        <div class="meta">${{sub}}${{inj}}</div>
+      </td>
       <td class="l"><span class="pos ${{r.position}}">${{r.position}}</span></td>
-      <td class="l">${{r.nfl_team || '—'}}</td>
       <td><b>${{num(r.vorp, 1)}}</b></td>
-      <td>${{num(r.projection_calibrated || r.projection, 1)}}</td>
       <td>${{num(r.adp_rank, 0)}}</td>
       <td class="${{dc}}">${{ds}}</td>
-      <td class="l">${{note}}</td>
+      <td>${{num(r.projection_calibrated || r.projection, 1)}}</td>
     </tr>`;
   }}).join('');
 }}

@@ -43,9 +43,14 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
 
 ## Code conventions
 
-- **Player identity:** `nflverse` `gsis_id` is the canonical key. Sleeper
-  `player_id` and FantasyPros names are *reconciled to it* via
-  `src/ingest/player_ids.py`. Never join on player name.
+- **Player identity:** `nflverse` `gsis_id` is the canonical key (`player_key`).
+  Sleeper `player_id` and FantasyPros ids are *reconciled to it* via
+  `src/ingest/player_ids.py`, anchored on DynastyProcess's `ff_playerids`.
+  Never join on player name — name matching exists only as a reported fallback.
+  Two entities have no gsis_id and get synthetic keys: team defenses are
+  `DEF_<team>` and gsis-less rookies are `FP_<fantasypros_id>`.
+  The draft board carries **both** `player_key` and `player_id`: the live
+  monitor matches Sleeper's feed on `player_id`, and nothing else can.
 - **Timestamps:** UTC, ISO 8601. Sleeper returns epoch milliseconds — convert on ingest.
 - **Caching:** every raw pull lands in `data/raw/` as parquet, partitioned by season.
   Cache is invalidated weekly in-season, never mid-draft.
@@ -72,6 +77,25 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   doesn't, we ship the blend. This is the single most important guardrail here.
 - **Calibration correction is applied after projection, not learned inside it.**
   Projection spread is systematically too wide; shrink toward the positional mean.
+
+- **FantasyPros point projections are not obtainable; ECR is.** As of 2026-08-30
+  fantasypros.com server-renders only the top 10 rows of each projections table,
+  so the planned "FantasyPros PPR consensus projection" component does not exist.
+  What we get instead is their **expert consensus ranking**, redistributed by
+  ffverse (`nflreadpy.load_ff_rankings`), which `src/features/rank_curve.py`
+  converts to points through a historical positional rank→points curve.
+
+- **The rank curve is fit on finish rank, so it must be shrunk.** Mapping a
+  *projected* rank through a *finish*-rank curve assumes the projection is as
+  good as hindsight, which makes the spread too wide. `calibration.py` handles
+  the general case. K and DEF get a second, measured shrink on top
+  (`calibration.persistence_shrink` in the config) because their rank ordering
+  barely persists year to year — measured on 2020–2025, Spearman of prior-year
+  rank vs next-year points is 0.26 for DEF and 0.34 for K against 0.62 for QB.
+  It is scoped to those two positions on purpose; see the docstring in
+  `rank_curve.persistence_shrink` for why applying it to skill positions would
+  be wrong. **This is the one place a measured number stands in for a validated
+  one — the walk-forward backtest should settle it.**
 
 ## Leakage rules — the failure mode that will silently ruin this
 

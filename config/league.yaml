@@ -95,15 +95,52 @@ calibration:
     K: 0.60
     DEF: 0.60
 
+  # A second, measured shrink for positions whose rank ordering does not persist
+  # year to year. The rank curve is fit on finish rank, which assumes the
+  # projection is as good as hindsight; that assumption costs the most exactly
+  # where the consensus is weakest. Measured on 2020-2025 (Spearman, prior-year
+  # rank vs next-year points, top 48): QB 0.62, TE 0.54, RB 0.46, WR 0.45,
+  # K 0.34, DEF 0.26.
+  #
+  # Scoped to K and DEF on purpose. For the skill positions this measurement
+  # uses last year's rank as the stand-in projection, which is strictly worse
+  # than the expert consensus, so the number understates them. For K and DEF it
+  # matches what everyone already knows about streaming, and without it a
+  # defense lands around pick 32 on a value-based board.
+  #
+  # Set `positions: []` to disable. Recheck once the backtest can score it.
+  persistence_shrink:
+    positions: [K, DEF]
+    reference: QB
+
 # Consensus blend. Each component is z-scored within position, averaged, then
-# mapped back to points. Weights are equal by default — source accuracy does not
-# persist year to year, so simple averaging is the robust choice.
+# mapped back to points.
+#
+# Weights are equal *across peer sources* — source accuracy does not persist
+# year to year, so averaging is the robust choice and fitting these on six
+# seasons would be overfitting with extra steps.
+#
+# ECR is not a peer source, which is why it carries more weight. It already
+# contains both production components plus everything they structurally cannot:
+# depth charts, camp reports, holdouts, trades, and rookies with no NFL snaps.
+# The two production components are also not independent of each other — they
+# are last season measured twice, once with touchdown luck and once without —
+# so they split a single unit of weight rather than taking one each.
+#
+# This is the board's main tuning knob. Raising the production weights makes the
+# board disagree with the draft room more often; that is where the points are,
+# and also where the blowups are.
 blend:
   components:
-    xfp: 1.0          # nflverse expected fantasy points
-    fantasypros: 1.0  # FantasyPros PPR consensus projection
-    adp_vorp: 1.0     # VORP implied by consensus ADP
+    ecr_points: 2.0    # FantasyPros expert consensus rank -> points via rank curve
+    xfp_points: 0.5    # prior-season expected fantasy points, per-game, shrunk
+    prior_points: 0.5  # prior-season actual fantasy points, per-game, shrunk
   method: zscore_mean_within_position
+
+  # FantasyPros no longer server-renders more than the top 10 rows of its
+  # projections tables, so point projections are not scrapable. ECR (via
+  # ffverse, which redistributes it) is the consensus signal we actually get,
+  # and `src/features/rank_curve.py` converts it to points.
 
 paths:
   raw: data/raw
