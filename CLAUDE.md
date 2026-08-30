@@ -62,6 +62,13 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
 
 ## Non-obvious decisions (and why)
 
+- **Historical ECR exists, and the backtest uses it.**
+  `nflreadpy.load_ff_rankings(type="all")` returns ~1.8M dated FantasyPros ECR
+  snapshots back to 2019-12-27. That is what makes the walk-forward honest: a
+  fold gets the ranking the room actually held in August of that year, not a
+  hindsight ranking dressed up as a projection. Preseason `redraft-overall`
+  coverage starts in 2021, so **2020 can be trained on but never targeted**.
+
 - **Backtest window is 2020–2025, not 2010+.** Rule and environment changes make
   older seasons weakly transferable, and FantasyPros ADP coverage thins out before
   ~2014. Six seasons is enough for walk-forward with a purge gap. See
@@ -84,6 +91,31 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   What we get instead is their **expert consensus ranking**, redistributed by
   ffverse (`nflreadpy.load_ff_rankings`), which `src/features/rank_curve.py`
   converts to points through a historical positional rank→points curve.
+
+- **K and DEF are priced at the market, not at their VORP.** Value-based
+  drafting says the best defense out-scores the waiver defense by ~12 points a
+  season — true — and concludes you should spend a sixth-round pick on him,
+  which is not. The market prices two things VORP does not model: those points
+  are unpredictable in advance, and the position is streamable all year, so the
+  *pick* buys far less than the *points* imply. `src/features/market_anchor.py`
+  blends an anchored position's VORP rank toward its ADP rank
+  (`config: market_anchor`). DEF is anchored hard (sits at ADP); K is anchored
+  loosely, so a genuinely exceptional leg can still surface.
+
+  **Anchor in rank space, never in value space.** Replacing an anchored player's
+  VORP with the value the market implies for his slot does not work: that value
+  is a conditional mean, so everyone scattered above the mean sorts past him and
+  the position lands ~55 spots *above* its ADP instead of at it. Ranks compose
+  the way the intuition expects; values do not. Both failure modes are pinned by
+  tests in `tests/test_market_anchor.py`.
+
+- **The board and the backtest share one valuation pipeline.**
+  `src/features/pipeline.py` is called by both `scripts/build_draft_board.py`
+  and `scripts/run_backtest.py`. If they diverge, the backtest is scoring a
+  program nobody drafts with and every conclusion from it is about the wrong
+  system. The *only* thing the live board adds is Sleeper injury status and
+  current team — which the backtest must never touch, because that data is
+  current rather than historical and using it in a fold is direct leakage.
 
 - **The rank curve is fit on finish rank, so it must be shrunk.** Mapping a
   *projected* rank through a *finish*-rank curve assumes the projection is as

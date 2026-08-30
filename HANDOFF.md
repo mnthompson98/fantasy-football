@@ -3,19 +3,32 @@
 **Last updated:** 2026-08-30
 **Repo:** https://github.com/mnthompson98/fantasy-football
 **Branch:** main
-**Tests:** 84/84 passing on Python 3.14
+**Tests:** 99/99 passing on Python 3.14
 
 ---
 
-## The board works. Build it like this
+## The four commands
 
 ```bash
-.venv/Scripts/python.exe -m scripts.build_draft_board --league-id <2026_league_id>
+# 1. Confirm the league is what the config thinks it is. Run this first.
+.venv/Scripts/python.exe -m scripts.verify_league_settings <2026_league_id>
+
+# 2. Build the board. Do this again the morning of the draft.
+.venv/Scripts/python.exe -m scripts.build_draft_board --league-id <2026_league_id> --refresh
+
+# 3. During the draft.
+.venv/Scripts/python.exe -m src.draft.monitor --draft-id <draft_id> --my-slot <n>
+
+# 4. Whenever you change the valuation, check it against 2022-2025.
+.venv/Scripts/python.exe -m scripts.run_backtest --drafts 40 --label what-changed
 ```
 
-Without `--league-id` it uses the verified 2025 scoring settings, which are
-correct unless the commissioner changed something. Outputs land in
-`outputs/projections/`:
+Set `PYTHONIOENCODING=utf-8` first — Windows defaults to cp1252 and will crash
+on the first accented player name.
+
+## Where the board lands
+
+`build_draft_board` writes to `outputs/projections/`:
 
 | File | Use |
 |---|---|
@@ -24,14 +37,14 @@ correct unless the commissioner changed something. Outputs land in
 | `draft_board.parquet` | What the live monitor and the backtester read. |
 | `excluded_players.csv` | Everyone the injury gate removed, so nothing vanishes silently. |
 
-Then, during the draft:
-
-```bash
-.venv/Scripts/python.exe -m src.draft.monitor --draft-id <id> --my-slot <n>
-```
+Open `draft_board.html` in any browser — double-click it, or email it to
+yourself and open it on your phone. It needs no server and no network.
 
 The monitor is verified end-to-end against the completed 2025 draft: it read all
 160 real picks off Sleeper and removed exactly those players from the board.
+
+Backtest results append to `outputs/backtests/runs.parquet`, one row per
+simulated draft plus an aggregate, tagged with the git commit and config hash.
 
 ---
 
@@ -47,6 +60,9 @@ The monitor is verified end-to-end against the completed 2025 draft: it read all
 - ✅ `src/ingest/sleeper_api.py` — Sleeper read-only client, standings/bracket resolution
 - ✅ `src/ingest/nflverse.py` — cached nflverse/ffverse pulls, Polars→pandas at the boundary
 - ✅ `src/ingest/player_ids.py` — gsis-anchored crosswalk (FantasyPros ↔ Sleeper ↔ nflverse)
+- ✅ `src/ingest/history.py` — season-parameterized history + preseason ECR snapshots
+- ✅ `src/features/pipeline.py` — **the shared valuation, used by board and backtest alike**
+- ✅ `src/features/market_anchor.py` — prices K and DEF at what the room pays
 - ✅ `src/features/scoring.py` — league scoring settings applied to box scores, incl. K and DEF
 - ✅ `src/features/rank_curve.py` — positional rank→points curves + persistence shrink
 - ✅ `src/features/vorp.py` — flex-aware replacement level, cross-position comparison
@@ -60,7 +76,9 @@ The monitor is verified end-to-end against the completed 2025 draft: it read all
 - ✅ `src/draft/monitor.py` — live Sleeper poll, best-available, positional-run detection
 - ✅ `scripts/build_league_history.py` — regenerate datasets from API
 - ✅ `scripts/build_draft_board.py` — **the board, end to end**
-- ✅ 84 unit tests
+- ✅ `scripts/verify_league_settings.py` — check a live league against the config
+- ✅ `scripts/run_backtest.py` — **walk-forward, on real historical ECR**
+- ✅ 99 unit tests
 
 ### The pipeline the board actually runs
 
@@ -109,17 +127,15 @@ The monitor is verified end-to-end against the completed 2025 draft: it read all
 3. **Do a mock draft with the monitor running** to shake out the ergonomics.
 
 ### After the draft
-4. **Write `scripts/run_backtest.py`** — the walk-forward orchestration exists in
-   `src/backtest/walkforward.py` but has no entry point.
-   - Seasons 2020–2025, one-season purge gap
-   - Simulate ~40 drafts per season from varied slots and seeds
-   - Score on playoff weeks 15–17 first, per `metrics.py`
-   - Log to `outputs/backtests/runs.parquet`
-5. **Settle the open modelling questions below with the backtest**, not by
-   argument.
-6. **XGBoost projection model** — must beat the blend out-of-sample or the blend
+4. **Settle the open modelling questions below with the backtest**, not by
+   argument. `--label` tags a run so two configurations can be compared in
+   `outputs/backtests/runs.parquet`. The obvious first experiments:
+   - blend weights (ECR 2.0/0.5/0.5 vs equal vs ECR-only)
+   - market anchor on vs off
+   - persistence shrink on vs off
+5. **XGBoost projection model** — must beat the blend out-of-sample or the blend
    ships.
-7. **In-season automation** — `start_sit.py`, `waivers.py`, `trades.py`.
+6. **In-season automation** — `start_sit.py`, `waivers.py`, `trades.py`.
 
 ---
 
@@ -128,22 +144,35 @@ The monitor is verified end-to-end against the completed 2025 draft: it read all
 These are places where the board makes a defensible choice that has not been
 *validated*. They are listed in the order they are likely to cost points.
 
-### 1. K and DEF still rank higher than the room drafts them
+### 1. RESOLVED — K and DEF are now priced at the market
 
-After the persistence shrink, the top kicker sits around board rank 53 and the
-top defense around 56, against ADPs of 176 and 146. That is down from 32 and 35
-before the shrink, but it is still a large disagreement.
+Naive VBD put a defense at overall rank 32 and a kicker at 35. Two corrections,
+in sequence:
 
-The remaining gap is the classic value-based-drafting critique: VBD says the
-best defense really does out-score the waiver defense by ~12 points over a
-season, and the market says you should not spend a sixth-round pick to find out.
-Both may be right — the market is pricing variance and streamability, which the
-board does not model.
+- **Persistence shrink** (measured): DEF and K rank orderings barely persist
+  year to year, so a finish-rank curve overstates their spread. Moved them to
+  56 and 53.
+- **Market anchor** (`src/features/market_anchor.py`): blends an anchored
+  position's VORP *rank* toward its *ADP rank*. DEF at weight 1.0 sits exactly
+  at its ADP; K at 0.7 stays mostly market-priced but lets a genuinely good leg
+  climb.
 
-**Do not "fix" this by hand-tuning a fudge factor.** Either model streaming
-explicitly (replacement level for a position where 22 of 32 go undrafted is not
-the same as for one where the pool is exhausted), or let the walk-forward
-backtest score a board with and without the correction and take the winner.
+Where they land now:
+
+| | board | ADP | round (10-team) |
+|---|---|---|---|
+| Houston DEF | 146 | 146 | 15 |
+| Denver DEF | 156 | 155 | 16 |
+| Brandon Aubrey (K) | 140 | 176 | 14 |
+| Ka'imi Fairbairn (K) | 149 | 188 | 15 |
+
+Ordering *within* each position still follows our own valuation — Houston comes
+off the board before Denver, Aubrey before Fairbairn — which is the point of
+capping the anchor just below 1.0.
+
+**Still worth backtesting:** the anchor weights (DEF 1.0, K 0.7) are a stated
+preference, not a fitted result. `run_backtest.py --label` exists so you can
+score a board with and without them and compare.
 
 ### 2. Blend weights are a prior, not a result
 
@@ -169,11 +198,17 @@ can be fit properly and this whole correction chain gets simpler.
 ## Known limitations and caveats
 
 ### Before you trust the backtest
-- **The draft simulator is still synthetic-smoke-tested only.** The mechanics
-  are proven; it has not been run against real nflverse outcomes.
-- **ADP realism matters.** Rank the opponent model's ADP by consensus ECR, not
-  by raw projected points — value-unaware ADP puts every QB in the top 40 and
-  the simulation stops resembling a draft.
+- **Four scorable folds, and that is all there will be.** Targets are 2022-2025:
+  ffverse preseason ECR starts in 2021 and the purge gap costs one more season.
+  With ~40 drafts each that is enough to rank two configurations against each
+  other, and nowhere near enough to justify a subtle parameter.
+- **The lineup scorer is hindsight-optimal.** `optimal_lineup_points` starts the
+  best legal lineup in each week, which no real manager achieves. It is applied
+  identically to every simulated team, so the *comparison* is fair; treat the
+  absolute point totals as an upper bound.
+- **Opponents follow ADP with gaussian noise.** Real managers are worse than
+  that in some ways and better in others. A strategy that only beats this field
+  has not proven much.
 - **Rule changes.** The 2024 kickoff rule was a one-year anomaly; the config
   downweights 2024 K/DEF to 0.3.
 
@@ -241,9 +276,12 @@ board on draft morning because ffverse is briefly down is the worse failure.
 | `src/features/scoring.py` | League scoring applied to nflverse box scores |
 | `src/features/rank_curve.py` | Rank→points curves, persistence shrink |
 | `src/features/vorp.py` | VORP with flex-aware replacement level |
+| `src/features/pipeline.py` | The shared valuation. Change this, not a copy of it |
+| `src/features/market_anchor.py` | K/DEF priced at market. Read the docstring first |
+| `scripts/verify_league_settings.py` | Check a live league against the config |
+| `scripts/run_backtest.py` | Walk-forward over 2022–2025 |
 | `scripts/build_league_history.py` | Regenerate league history from API |
-| `scripts/run_backtest.py` | **TODO:** walk-forward entry point (not yet written) |
-| `.venv/Scripts/python.exe -m pytest tests/ -q` | 84 tests |
+| `.venv/Scripts/python.exe -m pytest tests/ -q` | 99 tests |
 
 ---
 

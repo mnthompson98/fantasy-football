@@ -29,6 +29,9 @@ BOARD_COLUMNS = [
     "projection", "projection_calibrated", "vorp", "replacement_points",
     "adp_rank", "adp_delta", "injury_status", "available",
     "bye_week", "blend_components_used",
+    # What pure VORP thought before the market got a vote, and how hard the
+    # market was allowed to vote. K and DEF are anchored; everyone else is 0.
+    "vorp_unanchored", "market_anchor",
 ]
 
 

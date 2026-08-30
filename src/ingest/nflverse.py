@@ -87,6 +87,25 @@ def load_ff_rankings(*, cache_dir: Path | str | None = None,
                    cache_dir=cache_dir, refresh=refresh)
 
 
+def load_ff_rankings_history(*, cache_dir: Path | str | None = None,
+                             refresh: bool = False) -> pd.DataFrame:
+    """Every ECR snapshot ffverse has kept, dated by `scrape_date`.
+
+    ~1.8M rows going back to 2019-12-27. This is what makes an honest backtest
+    possible: for a target season it gives the ranking the market actually held
+    *before* that season's draft, rather than a hindsight ranking dressed up as
+    a projection. Preseason `redraft-overall` coverage starts in 2021 — 2020 has
+    no usable snapshot, so 2020 can be trained on but never targeted.
+
+    Completed snapshots never change, so this caches for a week.
+    """
+    import nflreadpy as nfl
+    return _cached("ff_rankings_history",
+                   lambda: nfl.load_ff_rankings(type="all"),
+                   max_age_hours=FRESH_HOURS_STATIC,
+                   cache_dir=cache_dir, refresh=refresh)
+
+
 def load_ff_playerids(*, cache_dir: Path | str | None = None,
                       refresh: bool = False) -> pd.DataFrame:
     """DynastyProcess ID crosswalk: gsis, sleeper, fantasypros, pfr, and more."""

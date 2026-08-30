@@ -149,10 +149,15 @@ def summarize(results: list[BacktestResult]) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame([r.to_row() for r in results])
+    # The aggregate row labels these two columns "ALL" and "mixed", so both have
+    # to be strings for the whole frame — parquet has one type per column, and a
+    # column of ints with one str in it cannot be written at all.
+    df["season"] = df["season"].astype(str)
+    df["my_slot"] = df["my_slot"].astype(str)
     agg = {
         "season": "ALL",
         "seed": df["seed"].iloc[0],
-        "my_slot": "mixed" if df["my_slot"].nunique() > 1 else df["my_slot"].iloc[0],
+        "my_slot": "mixed" if df["my_slot"].nunique() > 1 else str(df["my_slot"].iloc[0]),
         "playoff_points": df["playoff_points"].mean(),
         "season_points": df["season_points"].mean(),
         "regular_season_points": df["regular_season_points"].mean(),

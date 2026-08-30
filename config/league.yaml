@@ -113,6 +113,34 @@ calibration:
     positions: [K, DEF]
     reference: QB
 
+# Pricing a position at what the room actually pays for it.
+#
+# VORP says the best defense out-scores the waiver defense by ~12 points over a
+# season. True — and it still concludes you should spend a sixth-round pick to
+# get him, which is wrong. The market prices two things VORP does not model:
+# those points are unpredictable in advance, and the position is streamable all
+# year, so the *pick* buys far less than the *points* imply.
+#
+# Weight 1.0 prices a position exactly where the market drafts it. 0.0 is pure
+# VORP. In between, an unusually good player at that position can still climb
+# above his ADP — the blend compresses how far the group floats without
+# flattening the ordering inside it.
+#
+#   DEF 1.0 — no defense is worth reaching for, and the ordering among them is
+#             mostly noise anyway (measured persistence 0.26). Sits at ADP.
+#   K   0.7 — mostly market, but a genuinely exceptional leg can surface. An
+#             ordinary kicker settles back toward where he is actually taken.
+#
+# `vorp_unanchored` is preserved on the board so you can always see what pure
+# VORP thought before the market got a vote.
+market_anchor:
+  positions:
+    DEF: 1.0
+    K: 0.7
+  # The pick-value curve is fit only on positions whose VORP we trust. Including
+  # an anchored position in its own reference curve would be circular.
+  reference_positions: [QB, RB, WR, TE]
+
 # Consensus blend. Each component is z-scored within position, averaged, then
 # mapped back to points.
 #
