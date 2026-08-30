@@ -1,0 +1,111 @@
+# League configuration.
+#
+# Values under `verified:` were pulled from the Sleeper API and confirmed.
+# Values under `assumed_2026:` are placeholders until the 2026 league is created —
+# re-run `python -m scripts.verify_league_settings <league_id>` and promote them.
+
+user:
+  sleeper_username: marwomp
+  sleeper_user_id: "737847784316874752"
+  # Display name varied by season; user_id is stable and is the join key.
+  known_display_names: [marwomp, marcuswthompson]
+
+# Historical league instances used for backtesting and behavioral modeling.
+history:
+  - season: 2021
+    name: Etown vs Louisville
+    league_id: "736349930742005760"
+    draft_id: "736349931933196288"
+    teams: 8
+    rounds: 15
+    scoring: ppr
+    my_roster_id: 7
+    my_finish: 8
+    champion: cammack14
+  - season: 2025
+    name: "Camden?"
+    league_id: "1262443299793276928"
+    draft_id: "1262443300887994368"
+    teams: 10
+    rounds: 16
+    scoring: ppr
+    my_roster_id: 4
+    my_finish: 3
+    champion: cammack14
+
+# Excluded on purpose — not competitive leagues, would pollute behavioral priors.
+excluded:
+  - name: Drakes Miners        # 2024, 4-team 2QB novelty
+    league_id: "1133933099097989120"
+  - name: Premier League Lads  # 2025, 6-team 2QB novelty
+    league_id: "1259985349774413824"
+
+verified:
+  scoring_format: ppr
+  waiver_type: 0            # 0 = rolling waiver order. NOT FAAB.
+  waiver_type_name: rolling_priority
+  faab_enabled: false       # waiver_budget=100 appears in payload but is inert
+  playoff_week_start: 15
+  playoff_weeks: [15, 16, 17]
+  playoff_teams: 6
+  playoff_byes: 2           # top 2 seeds
+  trade_deadline_week: 11
+  starters: [QB, RB, RB, WR, WR, TE, FLEX, K, DEF]
+  flex_eligible: [RB, WR, TE]
+
+assumed_2026:
+  teams: 10
+  bench_slots: 7
+  roster_size: 16
+  # TODO: confirm once the 2026 league exists.
+
+backtest:
+  # 2020 start: modern rules + complete FantasyPros ADP coverage.
+  seasons: [2020, 2021, 2022, 2023, 2024, 2025]
+  purge_gap_seasons: 1
+  seed: 20260830
+  # 2024 kickoff rule was a one-year anomaly; special teams scoring doesn't transfer.
+  downweight:
+    - season: 2024
+      positions: [K, DEF]
+      weight: 0.3
+
+  # Opponent draft model: sample each opponent pick from a truncated normal
+  # centered on ADP rank. Sigma is calibrated per position from historical ADP
+  # error by `scripts/calibrate_adp_sigma.py`; these are the fallback priors.
+  opponent_model:
+    adp_sigma_fallback:
+      QB: 12.0
+      RB: 10.0
+      WR: 8.0
+      TE: 11.0
+      K: 6.0
+      DEF: 6.0
+    positional_need_boost: 1.6   # multiplier when a starting slot is unfilled
+    positional_need_penalty: 0.4 # multiplier when the position is already full
+
+# Post-hoc calibration slopes. Projection spread is systematically too wide;
+# shrink toward the positional mean. Source: Fantasy Football Analytics, 2026.
+calibration:
+  slopes:
+    QB: 0.67
+    RB: 0.79
+    WR: 0.85
+    TE: 0.72
+    K: 0.60
+    DEF: 0.60
+
+# Consensus blend. Each component is z-scored within position, averaged, then
+# mapped back to points. Weights are equal by default — source accuracy does not
+# persist year to year, so simple averaging is the robust choice.
+blend:
+  components:
+    xfp: 1.0          # nflverse expected fantasy points
+    fantasypros: 1.0  # FantasyPros PPR consensus projection
+    adp_vorp: 1.0     # VORP implied by consensus ADP
+  method: zscore_mean_within_position
+
+paths:
+  raw: data/raw
+  processed: data/processed
+  outputs: outputs

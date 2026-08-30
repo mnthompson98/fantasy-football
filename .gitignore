@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+
+# Cached API pulls and derived feature tables — regenerate, don't commit.
+data/raw/
+data/processed/
+
+# Generated boards and reports.
+outputs/projections/
+outputs/reports/
+
+# Backtest run log is kept: it is the record of what was tried and what worked.
+!outputs/backtests/
+!outputs/backtests/runs.parquet
+
+.DS_Store
+.idea/
+.vscode/
