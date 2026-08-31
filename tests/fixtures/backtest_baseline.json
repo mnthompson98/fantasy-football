@@ -1,0 +1,78 @@
+{
+ "note": "Board-vs-ADP parity baseline. Guarded quantity is the GAP between the two runs: same data, same seed, same pick policy, same caps, same scorer, only the player ordering differs. Regenerate with `python -m scripts.check_backtest_baseline --write` and justify the move in the commit message.",
+ "recorded": "2026-08-31",
+ "git_commit": "609565a",
+ "tolerance": {
+  "parity_gap": 0.35,
+  "playoff_gap": 12.0,
+  "aggregate_rank": 0.4,
+  "season_rank": 0.9
+ },
+ "max_loss_to_adp": 0.5,
+ "valuation_fingerprint": {
+  "src/features/pipeline.py": "4aec0bc931211336",
+  "src/features/blend.py": "e2838a764d98f45b",
+  "src/features/calibration.py": "e2ec64f146f8f1e4",
+  "src/features/rank_curve.py": "f2c47227633df120",
+  "src/features/market_anchor.py": "b472c04e229a5dd3",
+  "src/features/slopes.py": "922965d26954949a",
+  "src/features/vorp.py": "82905ba7da12b785",
+  "src/backtest/draft_sim.py": "ac9f3216ccc29ab9"
+ },
+ "drafts_per_season": 40,
+ "seed": 20260830,
+ "runs": {
+  "vorp": {
+   "seasons": {
+    "2022": {
+     "league_rank_by_points": 3.875,
+     "playoff_points": 409.102
+    },
+    "2023": {
+     "league_rank_by_points": 2.275,
+     "playoff_points": 407.163
+    },
+    "2024": {
+     "league_rank_by_points": 4.0,
+     "playoff_points": 449.807
+    },
+    "2025": {
+     "league_rank_by_points": 7.8,
+     "playoff_points": 374.264
+    }
+   },
+   "all": {
+    "league_rank_by_points": 4.4875,
+    "playoff_points": 410.084,
+    "win_rate": 0.5638
+   },
+   "config_hash": "7223f4e945c2"
+  },
+  "adp_value": {
+   "seasons": {
+    "2022": {
+     "league_rank_by_points": 4.275,
+     "playoff_points": 402.885
+    },
+    "2023": {
+     "league_rank_by_points": 4.75,
+     "playoff_points": 382.883
+    },
+    "2024": {
+     "league_rank_by_points": 5.0,
+     "playoff_points": 426.255
+    },
+    "2025": {
+     "league_rank_by_points": 4.0,
+     "playoff_points": 433.866
+    }
+   },
+   "all": {
+    "league_rank_by_points": 4.5062,
+    "playoff_points": 411.472,
+    "win_rate": 0.5536
+   },
+   "config_hash": "318e6021af83"
+  }
+ }
+}

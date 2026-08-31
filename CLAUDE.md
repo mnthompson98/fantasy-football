@@ -108,6 +108,17 @@ depend on these. The league payload also carries a vestigial
   projection MAE.** A model that projects accurately but drafts players who miss
   weeks 15–17 has not helped. Metric priority is encoded in
   `src/backtest/metrics.py` and must not be reordered casually.
+- **The ADP comparison is a checked-in fixture, not a memory.**
+  `tests/fixtures/backtest_baseline.json` holds both runs at the shipping
+  config; `scripts/check_backtest_baseline.py` re-runs them and diffs.
+  The guarded quantity is the **gap** between the two, not either level: levels
+  move when ffverse backfills a season, the gap is measured on the same data,
+  seed, policy, caps and scorer with only the ordering changed. There is also an
+  absolute floor — the board finishing more than 0.5 places behind pure ADP
+  fails regardless of what the fixture says, so a carelessly re-recorded
+  baseline cannot silence it. It is opt-in (`RUN_BACKTEST_BASELINE=1`) because
+  it re-runs the full walk-forward twice.
+
 - **Always benchmark against raw ADP before believing the board adds anything.**
   `run_backtest --value-col adp_value` swaps only the player ordering, holding
   the pick policy, caps and scorer constant. Measured 2022-2025: the board beats
@@ -232,6 +243,18 @@ depend on these. The league payload also carries a vestigial
   the position lands ~55 spots *above* its ADP instead of at it. Ranks compose
   the way the intuition expects; values do not. Both failure modes are pinned by
   tests in `tests/test_market_anchor.py`.
+
+- **The live monitor and the backtest share one pick policy**, for the same
+  reason and with the same force as the pipeline rule below. The monitor
+  shipped printing a raw best-available list ordered by VORP — the exact policy
+  `ValueDrafter` exists to replace, whose docstring records the roster it built.
+  So HANDOFF's "the edge comes from the pick policy" described a program that
+  ran only inside the backtest. `src/draft/monitor.py` now imports `Roster`,
+  `ValueDrafter` and `picks_until_next_turn` from `src/backtest/draft_sim.py`
+  and reimplements none of them; it reconstructs your roster from the feed's
+  `draft_slot` and recommends through `ValueDrafter.choose`. A player you
+  drafted who is not on the board still counts against your caps — dropping him
+  silently raises them.
 
 - **The board and the backtest share one valuation pipeline.**
   `src/features/pipeline.py` is called by both `scripts/build_draft_board.py`

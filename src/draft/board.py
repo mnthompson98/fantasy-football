@@ -71,23 +71,48 @@ def finalize_board(df: pd.DataFrame, *, drop_unavailable: bool = True
 
 
 def best_available(board: pd.DataFrame, drafted_ids: set, *,
-                   position: str | None = None, n: int = 10) -> pd.DataFrame:
+                   position: str | None = None, n: int = 10,
+                   roster_counts: dict[str, int] | None = None,
+                   caps: dict[str, int] | None = None) -> pd.DataFrame:
+    """Best players still on the board.
+
+    `roster_counts` + `caps` drop positions you can no longer use. Without them
+    this is a raw VORP list, which is the thing `ValueDrafter` exists to stop
+    you doing: in the back half of a draft the top of an uncapped VORP list is
+    a backup quarterback you can never start. The live monitor always passes
+    them; the argument stays optional so a bare board dump still works.
+    """
     df = board[~board["player_id"].isin(drafted_ids)]
+    if caps:
+        counts = roster_counts or {}
+        full = {p for p, cap in caps.items() if counts.get(p, 0) >= cap}
+        if full:
+            trimmed = df[~df["position"].isin(full)]
+            # Never hand back nothing: if the caps exclude everyone left, the
+            # caps are wrong for this board, not the board wrong for the caps.
+            if not trimmed.empty:
+                df = trimmed
     if position:
         df = df[df["position"] == position]
     return df.head(n)
 
 
 def positional_run(recent_picks: list[dict], window: int = 6,
-                   threshold: float = 0.5) -> dict[str, float]:
+                   threshold: float = 0.5, min_picks: int = 3
+                   ) -> dict[str, float]:
     """Detect a positional run in the last `window` picks.
 
     Returns positions whose share of recent picks exceeds `threshold`. A run is
     a reason to move a position up, not a reason to panic — the useful signal
     is "the tier I want will be gone before my next pick", which the caller
     checks against picks-until-next-turn.
+
+    `min_picks` exists because share-of-window is meaningless on a tiny sample.
+    Without it the monitor announced "run in progress: WR 100%" after the first
+    pick of the draft, every time, and a warning that fires on pick one is a
+    warning nobody reads by pick fifty.
     """
-    if not recent_picks:
+    if len(recent_picks) < min_picks:
         return {}
     recent = recent_picks[-window:]
     counts: dict[str, int] = {}
@@ -103,7 +128,8 @@ def positional_run(recent_picks: list[dict], window: int = 6,
 
 
 def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
-           *, stem: str = "draft_board", meta: dict | None = None) -> dict[str, Path]:
+           *, stem: str = "draft_board", meta: dict | None = None,
+           drafted: set | None = None) -> dict[str, Path]:
     """Write parquet + CSV + HTML. Returns the paths written."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -115,14 +141,39 @@ def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
     }
     board.to_parquet(paths["parquet"], index=False)
     board.to_csv(paths["csv"], index=False)
-    paths["html"].write_text(_render_html(board, meta or {}), encoding="utf-8")
+    paths["html"].write_text(
+        _render_html(board, meta or {}, drafted=drafted), encoding="utf-8")
     return paths
 
 
-def _render_html(board: pd.DataFrame, meta: dict) -> str:
+def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
+                 *, meta: dict | None = None) -> Path:
+    """Rewrite the phone board with the live draft's picks struck through.
+
+    The HTML shipped as a tap-to-strike sheet backed by localStorage, which is
+    fine for the picks *you* make and useless for the other nine teams: between
+    two of your turns the room takes nine players and you would have to find and
+    tap all nine on a phone while your clock runs. Nobody does that, so by round
+    three the board on the phone is a list of players who are mostly gone.
+
+    So the monitor writes the drafted set into the page itself. Local taps stay
+    — they are how you mark a player you have decided against — but they are now
+    a *union* with the feed, not the only source. A player the feed says is gone
+    cannot be un-struck by tapping, because he is gone.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_render_html(board, meta or {}, drafted=drafted),
+                    encoding="utf-8")
+    return path
+
+
+def _render_html(board: pd.DataFrame, meta: dict,
+                 *, drafted: set | None = None) -> str:
     """Self-contained, phone-readable board with position filtering and search."""
     records = board.fillna("").to_dict(orient="records")
     payload = json.dumps(records)
+    drafted_payload = json.dumps(sorted(str(d) for d in (drafted or set())))
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     subtitle = " · ".join(
         f"{k}: {v}" for k, v in meta.items()
@@ -197,9 +248,12 @@ def _render_html(board: pd.DataFrame, meta: dict) -> str:
     <button data-p="QB">QB</button><button data-p="RB">RB</button>
     <button data-p="WR">WR</button><button data-p="TE">TE</button>
     <button data-p="K">K</button><button data-p="DEF">DEF</button>
+    <button id="hide">Hide taken</button>
   </div>
+  <div class="sub" id="cnt"></div>
 </header>
-<div class="hint">Tap a player to mark them drafted. Marks persist on this device.</div>
+<div class="hint">Drafted players strike out automatically while the monitor is
+running. Tap anyone else to mark them yourself; taps persist on this device.</div>
 <div class="wrap"><table>
 <thead><tr>
   <th class="l">#</th><th class="l">Player</th><th class="l">Pos</th>
@@ -207,13 +261,17 @@ def _render_html(board: pd.DataFrame, meta: dict) -> str:
 </tr></thead><tbody id="tb"></tbody></table></div>
 <script>
 const DATA = {payload};
+// Written by src/draft/monitor.py from the live Sleeper feed: every player the
+// room has taken, not just the ones you tapped. Empty on a pre-draft board.
+const DRAFTED = new Set({drafted_payload});
 const KEY = 'drafted_v1';
-let taken = new Set();
-try {{ taken = new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); }} catch (e) {{}}
-let pos = 'ALL', q = '';
+let taps = new Set();
+try {{ taps = new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); }} catch (e) {{}}
+let pos = 'ALL', q = '', hide = false;
 
+const isTaken = id => DRAFTED.has(id) || taps.has(id);
 function save() {{
-  try {{ localStorage.setItem(KEY, JSON.stringify([...taken])); }} catch (e) {{}}
+  try {{ localStorage.setItem(KEY, JSON.stringify([...taps])); }} catch (e) {{}}
 }}
 function num(v, d) {{
   return (v === '' || v === null || v === undefined || isNaN(v))
@@ -223,8 +281,12 @@ function render() {{
   const tb = document.getElementById('tb');
   const rows = DATA.filter(r =>
     (pos === 'ALL' || r.position === pos) &&
-    (!q || String(r.player_name).toLowerCase().includes(q))
+    (!q || String(r.player_name).toLowerCase().includes(q)) &&
+    (!hide || !isTaken(String(r.player_id)))
   );
+  const gone = DATA.filter(r => isTaken(String(r.player_id))).length;
+  document.getElementById('cnt').textContent =
+    gone ? gone + ' off the board · ' + (DATA.length - gone) + ' left' : '';
   tb.innerHTML = rows.map(r => {{
     const id = String(r.player_id);
     const d = Number(r.adp_delta);
@@ -246,7 +308,7 @@ function render() {{
     const soft = String(r.injury_status) === 'Questionable' ? ' soft' : '';
     const inj = r.injury_status
       ? ` <span class="inj${{soft}}">${{r.injury_status}}</span>` : '';
-    return `<tr class="${{taken.has(id) ? 'taken' : ''}}" data-id="${{id}}">
+    return `<tr class="${{isTaken(id) ? 'taken' : ''}}" data-id="${{id}}">
       <td class="l">${{r.rank}}</td>
       <td class="l">
         <div class="nm">${{r.player_name}}</div>
@@ -263,9 +325,16 @@ function render() {{
 document.getElementById('tb').addEventListener('click', e => {{
   const tr = e.target.closest('tr'); if (!tr) return;
   const id = tr.dataset.id;
-  taken.has(id) ? taken.delete(id) : taken.add(id);
+  // A player the live feed says is drafted stays struck: tapping him is a
+  // misclick, not a correction, and un-striking him would put a player who is
+  // genuinely gone back at the top of your board.
+  if (DRAFTED.has(id)) return;
+  taps.has(id) ? taps.delete(id) : taps.add(id);
   save(); render();
 }});
+document.getElementById('hide').onclick = e => {{
+  hide = !hide; e.target.classList.toggle('on', hide); render();
+}};
 document.querySelectorAll('button[data-p]').forEach(b => {{
   b.onclick = () => {{
     document.querySelectorAll('button[data-p]').forEach(x => x.classList.remove('on'));

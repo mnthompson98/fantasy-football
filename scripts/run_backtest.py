@@ -143,6 +143,60 @@ def make_board_builder(cfg: dict, *, totals: pd.DataFrame,
     return build
 
 
+def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
+             drafts: int | None = None, seasons: list[int] | None = None,
+             label: str = "", refresh: bool = False, verbose: bool = True,
+             output_dir: Path | None = None) -> dict[str, pd.DataFrame]:
+    """Run the walk-forward once per `value_col`, sharing the loaded history.
+
+    Factored out of `main` so the parity check
+    (`scripts/check_backtest_baseline.py`) scores the board and the pure-ADP
+    baseline through *this* path rather than a parallel copy of it. Two numbers
+    produced by two implementations are not a comparison.
+
+    Ingest is the expensive part and it is identical for every `value_col`, so
+    it happens once and the folds are re-simulated per ordering.
+    """
+    scoring = Scoring.from_league(None)
+    if verbose:
+        print("\nscoring history and building the crosswalk...")
+    base = backtest_config(cfg, drafts=drafts, seasons=seasons)
+    crosswalk = build_crosswalk(nv.load_ff_playerids(refresh=refresh))
+    weekly = H.scored_weekly(base.seasons, scoring, refresh=refresh)
+    totals = H.season_totals_for(base.seasons, scoring)
+    rankings = nv.load_ff_rankings_history(refresh=refresh)
+    if verbose:
+        print(f"  {len(totals)} player-seasons · {len(weekly)} player-weeks · "
+              f"{len(rankings)} archived ranking rows")
+
+    # The scorer wants one row per player-week with `points`.
+    weekly_actuals = weekly.rename(
+        columns={"player_key": "player_id", "fantasy_points": "points"})
+    weekly_actuals = weekly_actuals[weekly_actuals["season_type"] == "REG"]
+
+    out: dict[str, pd.DataFrame] = {}
+    for value_col in value_cols:
+        bt_cfg = backtest_config(cfg, drafts=drafts, seasons=seasons)
+        bt_cfg.value_col = value_col
+        if verbose:
+            print(f"\nbuilding boards ({value_col})...")
+        builder = make_board_builder(cfg, totals=totals, rankings=rankings,
+                                     crosswalk=crosswalk, verbose=verbose)
+        if verbose:
+            print("\nsimulating...")
+        # `runs.parquet` records neither the value column nor the draft count,
+        # so two orderings logged under one label are indistinguishable in the
+        # record afterwards. Disambiguate when there is more than one; leave a
+        # single run's label exactly as the caller gave it, which is what the
+        # CLI's `--label` has always meant.
+        out[value_col] = run_backtest(
+            bt_cfg, board_builder=builder, weekly_actuals=weekly_actuals,
+            output_dir=output_dir or (ROOT / "outputs" / "backtests"),
+            label=f"{label}-{value_col}" if len(value_cols) > 1 else label,
+        )
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Walk-forward backtest")
     ap.add_argument("--drafts", type=int, default=None,
@@ -175,29 +229,9 @@ def main() -> int:
         f"{f.target_season}(train {f.train_seasons[0]}-{f.train_seasons[-1]})"
         for f in folds))
 
-    scoring = Scoring.from_league(None)
-    print("\nscoring history and building the crosswalk...")
-    crosswalk = build_crosswalk(nv.load_ff_playerids(refresh=args.refresh))
-    weekly = H.scored_weekly(bt_cfg.seasons, scoring, refresh=args.refresh)
-    totals = H.season_totals_for(bt_cfg.seasons, scoring)
-    rankings = nv.load_ff_rankings_history(refresh=args.refresh)
-    print(f"  {len(totals)} player-seasons · {len(weekly)} player-weeks · "
-          f"{len(rankings)} archived ranking rows")
-
-    # The scorer wants one row per player-week with `points`.
-    weekly_actuals = weekly.rename(
-        columns={"player_key": "player_id", "fantasy_points": "points"})
-    weekly_actuals = weekly_actuals[weekly_actuals["season_type"] == "REG"]
-
-    print("\nbuilding boards...")
-    builder = make_board_builder(
-        cfg, totals=totals, rankings=rankings, crosswalk=crosswalk, verbose=True)
-
-    print("\nsimulating...")
-    summary = run_backtest(
-        bt_cfg, board_builder=builder, weekly_actuals=weekly_actuals,
-        output_dir=ROOT / "outputs" / "backtests", label=args.label,
-    )
+    summary = evaluate(cfg, value_cols=(args.value_col,), drafts=args.drafts,
+                       seasons=seasons, label=args.label,
+                       refresh=args.refresh)[args.value_col]
 
     per_fold = summary[summary["season"] != "ALL"]
     agg = summary[summary["season"] == "ALL"].iloc[0]

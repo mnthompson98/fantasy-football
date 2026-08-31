@@ -1,0 +1,2250 @@
+{
+ "note": "Real Sleeper feed, league Camden? 2025 draft 1262443300887994368. Trimmed to the fields the monitor reads. Checked in so the live draft path is testable offline and the payload shape is pinned.",
+ "draft_id": "1262443300887994368",
+ "settings": {
+  "teams": 10,
+  "rounds": 16
+ },
+ "picks": [
+  {
+   "pick_no": 1,
+   "round": 1,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "7564",
+   "metadata": {
+    "first_name": "Ja'Marr",
+    "last_name": "Chase",
+    "position": "WR",
+    "team": "CIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 2,
+   "round": 1,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "4866",
+   "metadata": {
+    "first_name": "Saquon",
+    "last_name": "Barkley",
+    "position": "RB",
+    "team": "PHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 3,
+   "round": 1,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "6786",
+   "metadata": {
+    "first_name": "CeeDee",
+    "last_name": "Lamb",
+    "position": "WR",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 4,
+   "round": 1,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "9509",
+   "metadata": {
+    "first_name": "Bijan",
+    "last_name": "Robinson",
+    "position": "RB",
+    "team": "ATL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 5,
+   "round": 1,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "9221",
+   "metadata": {
+    "first_name": "Jahmyr",
+    "last_name": "Gibbs",
+    "position": "RB",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 6,
+   "round": 1,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "6794",
+   "metadata": {
+    "first_name": "Justin",
+    "last_name": "Jefferson",
+    "position": "WR",
+    "team": "MIN",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 7,
+   "round": 1,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "3198",
+   "metadata": {
+    "first_name": "Derrick",
+    "last_name": "Henry",
+    "position": "RB",
+    "team": "BAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 8,
+   "round": 1,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "7547",
+   "metadata": {
+    "first_name": "Amon-Ra",
+    "last_name": "St. Brown",
+    "position": "WR",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 9,
+   "round": 1,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "4034",
+   "metadata": {
+    "first_name": "Christian",
+    "last_name": "McCaffrey",
+    "position": "RB",
+    "team": "SF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 10,
+   "round": 1,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "9493",
+   "metadata": {
+    "first_name": "Puka",
+    "last_name": "Nacua",
+    "position": "WR",
+    "team": "LAR",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 11,
+   "round": 2,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "11632",
+   "metadata": {
+    "first_name": "Malik",
+    "last_name": "Nabers",
+    "position": "WR",
+    "team": "NYG",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 12,
+   "round": 2,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "7569",
+   "metadata": {
+    "first_name": "Nico",
+    "last_name": "Collins",
+    "position": "WR",
+    "team": "HOU",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 13,
+   "round": 2,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "12527",
+   "metadata": {
+    "first_name": "Ashton",
+    "last_name": "Jeanty",
+    "position": "RB",
+    "team": "LV",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 14,
+   "round": 2,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "11604",
+   "metadata": {
+    "first_name": "Brock",
+    "last_name": "Bowers",
+    "position": "TE",
+    "team": "LV",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 15,
+   "round": 2,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "11631",
+   "metadata": {
+    "first_name": "Brian",
+    "last_name": "Thomas",
+    "position": "WR",
+    "team": "JAX",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 16,
+   "round": 2,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "8112",
+   "metadata": {
+    "first_name": "Drake",
+    "last_name": "London",
+    "position": "WR",
+    "team": "ATL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 17,
+   "round": 2,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "5850",
+   "metadata": {
+    "first_name": "Josh",
+    "last_name": "Jacobs",
+    "position": "RB",
+    "team": "GB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 18,
+   "round": 2,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "9224",
+   "metadata": {
+    "first_name": "Chase",
+    "last_name": "Brown",
+    "position": "RB",
+    "team": "CIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 19,
+   "round": 2,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "5859",
+   "metadata": {
+    "first_name": "A.J.",
+    "last_name": "Brown",
+    "position": "WR",
+    "team": "PHI",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 20,
+   "round": 2,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "9226",
+   "metadata": {
+    "first_name": "De'Von",
+    "last_name": "Achane",
+    "position": "RB",
+    "team": "MIA",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 21,
+   "round": 3,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "11584",
+   "metadata": {
+    "first_name": "Bucky",
+    "last_name": "Irving",
+    "position": "RB",
+    "team": "TB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 22,
+   "round": 3,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "4881",
+   "metadata": {
+    "first_name": "Lamar",
+    "last_name": "Jackson",
+    "position": "QB",
+    "team": "BAL",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 23,
+   "round": 3,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "4984",
+   "metadata": {
+    "first_name": "Josh",
+    "last_name": "Allen",
+    "position": "QB",
+    "team": "BUF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 24,
+   "round": 3,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "9488",
+   "metadata": {
+    "first_name": "Jaxon",
+    "last_name": "Smith-Njigba",
+    "position": "WR",
+    "team": "SEA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 25,
+   "round": 3,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "8130",
+   "metadata": {
+    "first_name": "Trey",
+    "last_name": "McBride",
+    "position": "TE",
+    "team": "ARI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 26,
+   "round": 3,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "8150",
+   "metadata": {
+    "first_name": "Kyren",
+    "last_name": "Williams",
+    "position": "RB",
+    "team": "LAR",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 27,
+   "round": 3,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "6813",
+   "metadata": {
+    "first_name": "Jonathan",
+    "last_name": "Taylor",
+    "position": "RB",
+    "team": "IND",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 28,
+   "round": 3,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "11635",
+   "metadata": {
+    "first_name": "Ladd",
+    "last_name": "McConkey",
+    "position": "WR",
+    "team": "LAC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 29,
+   "round": 3,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "3321",
+   "metadata": {
+    "first_name": "Tyreek",
+    "last_name": "Hill",
+    "position": "WR",
+    "team": "MIA",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 30,
+   "round": 3,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "8138",
+   "metadata": {
+    "first_name": "James",
+    "last_name": "Cook",
+    "position": "RB",
+    "team": "BUF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 31,
+   "round": 4,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "11566",
+   "metadata": {
+    "first_name": "Jayden",
+    "last_name": "Daniels",
+    "position": "QB",
+    "team": "WAS",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 32,
+   "round": 4,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "6904",
+   "metadata": {
+    "first_name": "Jalen",
+    "last_name": "Hurts",
+    "position": "QB",
+    "team": "PHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 33,
+   "round": 4,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "8155",
+   "metadata": {
+    "first_name": "Breece",
+    "last_name": "Hall",
+    "position": "RB",
+    "team": "NYJ",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 34,
+   "round": 4,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "6770",
+   "metadata": {
+    "first_name": "Joe",
+    "last_name": "Burrow",
+    "position": "QB",
+    "team": "CIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 35,
+   "round": 4,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "12507",
+   "metadata": {
+    "first_name": "Omarion",
+    "last_name": "Hampton",
+    "position": "RB",
+    "team": "LAC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 36,
+   "round": 4,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "6801",
+   "metadata": {
+    "first_name": "Tee",
+    "last_name": "Higgins",
+    "position": "WR",
+    "team": "CIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 37,
+   "round": 4,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "5927",
+   "metadata": {
+    "first_name": "Terry",
+    "last_name": "McLaurin",
+    "position": "WR",
+    "team": "WAS",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 38,
+   "round": 4,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "4217",
+   "metadata": {
+    "first_name": "George",
+    "last_name": "Kittle",
+    "position": "TE",
+    "team": "SF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 39,
+   "round": 4,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "4035",
+   "metadata": {
+    "first_name": "Alvin",
+    "last_name": "Kamara",
+    "position": "RB",
+    "team": "NO",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 40,
+   "round": 4,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "2216",
+   "metadata": {
+    "first_name": "Mike",
+    "last_name": "Evans",
+    "position": "WR",
+    "team": "TB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 41,
+   "round": 5,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "11628",
+   "metadata": {
+    "first_name": "Marvin",
+    "last_name": "Harrison",
+    "position": "WR",
+    "team": "ARI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 42,
+   "round": 5,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "8146",
+   "metadata": {
+    "first_name": "Garrett",
+    "last_name": "Wilson",
+    "position": "WR",
+    "team": "NYJ",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 43,
+   "round": 5,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "8151",
+   "metadata": {
+    "first_name": "Kenneth",
+    "last_name": "Walker",
+    "position": "RB",
+    "team": "SEA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 44,
+   "round": 5,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "10859",
+   "metadata": {
+    "first_name": "Sam",
+    "last_name": "LaPorta",
+    "position": "TE",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 45,
+   "round": 5,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "12529",
+   "metadata": {
+    "first_name": "TreVeyon",
+    "last_name": "Henderson",
+    "position": "RB",
+    "team": "NE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 46,
+   "round": 5,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "4983",
+   "metadata": {
+    "first_name": "DJ",
+    "last_name": "Moore",
+    "position": "WR",
+    "team": "CHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 47,
+   "round": 5,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "2133",
+   "metadata": {
+    "first_name": "Davante",
+    "last_name": "Adams",
+    "position": "WR",
+    "team": "LAR",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 48,
+   "round": 5,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "5846",
+   "metadata": {
+    "first_name": "DK",
+    "last_name": "Metcalf",
+    "position": "WR",
+    "team": "PIT",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 49,
+   "round": 5,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "4137",
+   "metadata": {
+    "first_name": "James",
+    "last_name": "Conner",
+    "position": "RB",
+    "team": "ARI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 50,
+   "round": 5,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "7594",
+   "metadata": {
+    "first_name": "Chuba",
+    "last_name": "Hubbard",
+    "position": "RB",
+    "team": "CAR",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 51,
+   "round": 6,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "5844",
+   "metadata": {
+    "first_name": "T.J.",
+    "last_name": "Hockenson",
+    "position": "TE",
+    "team": "MIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 52,
+   "round": 6,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "5045",
+   "metadata": {
+    "first_name": "Courtland",
+    "last_name": "Sutton",
+    "position": "WR",
+    "team": "DEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 53,
+   "round": 6,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "1466",
+   "metadata": {
+    "first_name": "Travis",
+    "last_name": "Kelce",
+    "position": "TE",
+    "team": "KC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 54,
+   "round": 6,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "12526",
+   "metadata": {
+    "first_name": "Tetairoa",
+    "last_name": "McMillan",
+    "position": "WR",
+    "team": "CAR",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 55,
+   "round": 6,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "4046",
+   "metadata": {
+    "first_name": "Patrick",
+    "last_name": "Mahomes",
+    "position": "QB",
+    "team": "KC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 56,
+   "round": 6,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "11563",
+   "metadata": {
+    "first_name": "Bo",
+    "last_name": "Nix",
+    "position": "QB",
+    "team": "DEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 57,
+   "round": 6,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "12489",
+   "metadata": {
+    "first_name": "RJ",
+    "last_name": "Harvey",
+    "position": "RB",
+    "team": "DEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 58,
+   "round": 6,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "10229",
+   "metadata": {
+    "first_name": "Rashee",
+    "last_name": "Rice",
+    "position": "WR",
+    "team": "KC",
+    "injury_status": "Sus"
+   }
+  },
+  {
+   "pick_no": 59,
+   "round": 6,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "7525",
+   "metadata": {
+    "first_name": "DeVonta",
+    "last_name": "Smith",
+    "position": "WR",
+    "team": "PHI",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 60,
+   "round": 6,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "9997",
+   "metadata": {
+    "first_name": "Zay",
+    "last_name": "Flowers",
+    "position": "WR",
+    "team": "BAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 61,
+   "round": 7,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "4892",
+   "metadata": {
+    "first_name": "Baker",
+    "last_name": "Mayfield",
+    "position": "QB",
+    "team": "TB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 62,
+   "round": 7,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "5012",
+   "metadata": {
+    "first_name": "Mark",
+    "last_name": "Andrews",
+    "position": "TE",
+    "team": "BAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 63,
+   "round": 7,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "4981",
+   "metadata": {
+    "first_name": "Calvin",
+    "last_name": "Ridley",
+    "position": "WR",
+    "team": "TEN",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 64,
+   "round": 7,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "12530",
+   "metadata": {
+    "first_name": "Travis",
+    "last_name": "Hunter",
+    "position": "WR",
+    "team": "JAX",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 65,
+   "round": 7,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "11624",
+   "metadata": {
+    "first_name": "Xavier",
+    "last_name": "Worthy",
+    "position": "WR",
+    "team": "KC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 66,
+   "round": 7,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "5967",
+   "metadata": {
+    "first_name": "Tony",
+    "last_name": "Pollard",
+    "position": "RB",
+    "team": "TEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 67,
+   "round": 7,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "8148",
+   "metadata": {
+    "first_name": "Jameson",
+    "last_name": "Williams",
+    "position": "WR",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 68,
+   "round": 7,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "5892",
+   "metadata": {
+    "first_name": "David",
+    "last_name": "Montgomery",
+    "position": "RB",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 69,
+   "round": 7,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "4199",
+   "metadata": {
+    "first_name": "Aaron",
+    "last_name": "Jones",
+    "position": "RB",
+    "team": "MIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 70,
+   "round": 7,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "8137",
+   "metadata": {
+    "first_name": "George",
+    "last_name": "Pickens",
+    "position": "WR",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 71,
+   "round": 8,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "8205",
+   "metadata": {
+    "first_name": "Isiah",
+    "last_name": "Pacheco",
+    "position": "RB",
+    "team": "KC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 72,
+   "round": 8,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "6790",
+   "metadata": {
+    "first_name": "D'Andre",
+    "last_name": "Swift",
+    "position": "RB",
+    "team": "CHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 73,
+   "round": 8,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "3163",
+   "metadata": {
+    "first_name": "Jared",
+    "last_name": "Goff",
+    "position": "QB",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 74,
+   "round": 8,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "6783",
+   "metadata": {
+    "first_name": "Jerry",
+    "last_name": "Jeudy",
+    "position": "WR",
+    "team": "CLE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 75,
+   "round": 8,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "8144",
+   "metadata": {
+    "first_name": "Chris",
+    "last_name": "Olave",
+    "position": "WR",
+    "team": "NO",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 76,
+   "round": 8,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "11638",
+   "metadata": {
+    "first_name": "Ricky",
+    "last_name": "Pearsall",
+    "position": "WR",
+    "team": "SF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 77,
+   "round": 8,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "12514",
+   "metadata": {
+    "first_name": "Emeka",
+    "last_name": "Egbuka",
+    "position": "WR",
+    "team": "TB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 78,
+   "round": 8,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "2449",
+   "metadata": {
+    "first_name": "Stefon",
+    "last_name": "Diggs",
+    "position": "WR",
+    "team": "NE",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 79,
+   "round": 8,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "7526",
+   "metadata": {
+    "first_name": "Jaylen",
+    "last_name": "Waddle",
+    "position": "WR",
+    "team": "MIA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 80,
+   "round": 8,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "12504",
+   "metadata": {
+    "first_name": "Kaleb",
+    "last_name": "Johnson",
+    "position": "RB",
+    "team": "PIT",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 81,
+   "round": 9,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "4033",
+   "metadata": {
+    "first_name": "David",
+    "last_name": "Njoku",
+    "position": "TE",
+    "team": "CLE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 82,
+   "round": 9,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "11655",
+   "metadata": {
+    "first_name": "Tyrone",
+    "last_name": "Tracy",
+    "position": "RB",
+    "team": "NYG",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 83,
+   "round": 9,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "9753",
+   "metadata": {
+    "first_name": "Zach",
+    "last_name": "Charbonnet",
+    "position": "RB",
+    "team": "SEA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 84,
+   "round": 9,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "5849",
+   "metadata": {
+    "first_name": "Kyler",
+    "last_name": "Murray",
+    "position": "QB",
+    "team": "ARI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 85,
+   "round": 9,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "7543",
+   "metadata": {
+    "first_name": "Travis",
+    "last_name": "Etienne",
+    "position": "RB",
+    "team": "JAX",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 86,
+   "round": 9,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "4066",
+   "metadata": {
+    "first_name": "Evan",
+    "last_name": "Engram",
+    "position": "TE",
+    "team": "DEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 87,
+   "round": 9,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "8228",
+   "metadata": {
+    "first_name": "Jaylen",
+    "last_name": "Warren",
+    "position": "RB",
+    "team": "PIT",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 88,
+   "round": 9,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "5947",
+   "metadata": {
+    "first_name": "Jakobi",
+    "last_name": "Meyers",
+    "position": "WR",
+    "team": "LV",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 89,
+   "round": 9,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "12501",
+   "metadata": {
+    "first_name": "Matthew",
+    "last_name": "Golden",
+    "position": "WR",
+    "team": "GB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 90,
+   "round": 9,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "5872",
+   "metadata": {
+    "first_name": "Deebo",
+    "last_name": "Samuel",
+    "position": "WR",
+    "team": "WAS",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 91,
+   "round": 10,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "12518",
+   "metadata": {
+    "first_name": "Tyler",
+    "last_name": "Warren",
+    "position": "TE",
+    "team": "IND",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 92,
+   "round": 10,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "12517",
+   "metadata": {
+    "first_name": "Colston",
+    "last_name": "Loveland",
+    "position": "TE",
+    "team": "CHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 93,
+   "round": 10,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "4039",
+   "metadata": {
+    "first_name": "Cooper",
+    "last_name": "Kupp",
+    "position": "WR",
+    "team": "SEA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 94,
+   "round": 10,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "11620",
+   "metadata": {
+    "first_name": "Rome",
+    "last_name": "Odunze",
+    "position": "WR",
+    "team": "CHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 95,
+   "round": 10,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "11533",
+   "metadata": {
+    "first_name": "Brandon",
+    "last_name": "Aubrey",
+    "position": "K",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 96,
+   "round": 10,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "8134",
+   "metadata": {
+    "first_name": "Khalil",
+    "last_name": "Shakir",
+    "position": "WR",
+    "team": "BUF",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 97,
+   "round": 10,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "9225",
+   "metadata": {
+    "first_name": "Tank",
+    "last_name": "Bigsby",
+    "position": "RB",
+    "team": "JAX",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 98,
+   "round": 10,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "7588",
+   "metadata": {
+    "first_name": "Javonte",
+    "last_name": "Williams",
+    "position": "RB",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 99,
+   "round": 10,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "6819",
+   "metadata": {
+    "first_name": "Michael",
+    "last_name": "Pittman",
+    "position": "WR",
+    "team": "IND",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 100,
+   "round": 10,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "7049",
+   "metadata": {
+    "first_name": "Jauan",
+    "last_name": "Jennings",
+    "position": "WR",
+    "team": "SF",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 101,
+   "round": 11,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "9484",
+   "metadata": {
+    "first_name": "Tucker",
+    "last_name": "Kraft",
+    "position": "TE",
+    "team": "GB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 102,
+   "round": 11,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "8183",
+   "metadata": {
+    "first_name": "Brock",
+    "last_name": "Purdy",
+    "position": "QB",
+    "team": "SF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 103,
+   "round": 11,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "SEA",
+   "metadata": {
+    "first_name": "Seattle",
+    "last_name": "Seahawks",
+    "position": "DEF",
+    "team": "SEA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 104,
+   "round": 11,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "1479",
+   "metadata": {
+    "first_name": "Keenan",
+    "last_name": "Allen",
+    "position": "WR",
+    "team": "LAC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 105,
+   "round": 11,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "6806",
+   "metadata": {
+    "first_name": "J.K.",
+    "last_name": "Dobbins",
+    "position": "RB",
+    "team": "DEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 106,
+   "round": 11,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "8408",
+   "metadata": {
+    "first_name": "Jordan",
+    "last_name": "Mason",
+    "position": "RB",
+    "team": "MIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 107,
+   "round": 11,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "DEN",
+   "metadata": {
+    "first_name": "Denver",
+    "last_name": "Broncos",
+    "position": "DEF",
+    "team": "DEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 108,
+   "round": 11,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "PHI",
+   "metadata": {
+    "first_name": "Philadelphia",
+    "last_name": "Eagles",
+    "position": "DEF",
+    "team": "PHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 109,
+   "round": 11,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "BAL",
+   "metadata": {
+    "first_name": "Baltimore",
+    "last_name": "Ravens",
+    "position": "DEF",
+    "team": "BAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 110,
+   "round": 11,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "PIT",
+   "metadata": {
+    "first_name": "Pittsburgh",
+    "last_name": "Steelers",
+    "position": "DEF",
+    "team": "PIT",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 111,
+   "round": 12,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "7553",
+   "metadata": {
+    "first_name": "Kyle",
+    "last_name": "Pitts",
+    "position": "TE",
+    "team": "ATL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 112,
+   "round": 12,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "10236",
+   "metadata": {
+    "first_name": "Dalton",
+    "last_name": "Kincaid",
+    "position": "TE",
+    "team": "BUF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 113,
+   "round": 12,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "8154",
+   "metadata": {
+    "first_name": "Brian",
+    "last_name": "Robinson",
+    "position": "RB",
+    "team": "SF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 114,
+   "round": 12,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "5022",
+   "metadata": {
+    "first_name": "Dallas",
+    "last_name": "Goedert",
+    "position": "TE",
+    "team": "PHI",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 115,
+   "round": 12,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "9756",
+   "metadata": {
+    "first_name": "Jordan",
+    "last_name": "Addison",
+    "position": "WR",
+    "team": "MIN",
+    "injury_status": "Sus"
+   }
+  },
+  {
+   "pick_no": 116,
+   "round": 12,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "8110",
+   "metadata": {
+    "first_name": "Jake",
+    "last_name": "Ferguson",
+    "position": "TE",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 117,
+   "round": 12,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "12533",
+   "metadata": {
+    "first_name": "Jacory",
+    "last_name": "Croskey-Merritt",
+    "position": "RB",
+    "team": "WAS",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 118,
+   "round": 12,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "3294",
+   "metadata": {
+    "first_name": "Dak",
+    "last_name": "Prescott",
+    "position": "QB",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 119,
+   "round": 12,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "MIN",
+   "metadata": {
+    "first_name": "Minnesota",
+    "last_name": "Vikings",
+    "position": "DEF",
+    "team": "MIN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 120,
+   "round": 12,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "10222",
+   "metadata": {
+    "first_name": "Jayden",
+    "last_name": "Reed",
+    "position": "WR",
+    "team": "GB",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 121,
+   "round": 13,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "BUF",
+   "metadata": {
+    "first_name": "Buffalo",
+    "last_name": "Bills",
+    "position": "DEF",
+    "team": "BUF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 122,
+   "round": 13,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "11539",
+   "metadata": {
+    "first_name": "Jake",
+    "last_name": "Bates",
+    "position": "K",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 123,
+   "round": 13,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "12484",
+   "metadata": {
+    "first_name": "Jayden",
+    "last_name": "Higgins",
+    "position": "WR",
+    "team": "HOU",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 124,
+   "round": 13,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "HOU",
+   "metadata": {
+    "first_name": "Houston",
+    "last_name": "Texans",
+    "position": "DEF",
+    "team": "HOU",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 125,
+   "round": 13,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "DET",
+   "metadata": {
+    "first_name": "Detroit",
+    "last_name": "Lions",
+    "position": "DEF",
+    "team": "DET",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 126,
+   "round": 13,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "12512",
+   "metadata": {
+    "first_name": "Quinshon",
+    "last_name": "Judkins",
+    "position": "RB",
+    "team": "CLE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 127,
+   "round": 13,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "8259",
+   "metadata": {
+    "first_name": "Cameron",
+    "last_name": "Dicker",
+    "position": "K",
+    "team": "LAC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 128,
+   "round": 13,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "1945",
+   "metadata": {
+    "first_name": "Chris",
+    "last_name": "Boswell",
+    "position": "K",
+    "team": "PIT",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 129,
+   "round": 13,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "4037",
+   "metadata": {
+    "first_name": "Chris",
+    "last_name": "Godwin",
+    "position": "WR",
+    "team": "TB",
+    "injury_status": "Doubtful"
+   }
+  },
+  {
+   "pick_no": 130,
+   "round": 13,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "6797",
+   "metadata": {
+    "first_name": "Justin",
+    "last_name": "Herbert",
+    "position": "QB",
+    "team": "LAC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 131,
+   "round": 14,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "4663",
+   "metadata": {
+    "first_name": "Austin",
+    "last_name": "Ekeler",
+    "position": "RB",
+    "team": "WAS",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 132,
+   "round": 14,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "9758",
+   "metadata": {
+    "first_name": "C.J.",
+    "last_name": "Stroud",
+    "position": "QB",
+    "team": "HOU",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 133,
+   "round": 14,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "4144",
+   "metadata": {
+    "first_name": "Jonnu",
+    "last_name": "Smith",
+    "position": "TE",
+    "team": "PIT",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 134,
+   "round": 14,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "11560",
+   "metadata": {
+    "first_name": "Caleb",
+    "last_name": "Williams",
+    "position": "QB",
+    "team": "CHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 135,
+   "round": 14,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "12522",
+   "metadata": {
+    "first_name": "Cam",
+    "last_name": "Ward",
+    "position": "QB",
+    "team": "TEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 136,
+   "round": 14,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "11564",
+   "metadata": {
+    "first_name": "Drake",
+    "last_name": "Maye",
+    "position": "QB",
+    "team": "NE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 137,
+   "round": 14,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "6804",
+   "metadata": {
+    "first_name": "Jordan",
+    "last_name": "Love",
+    "position": "QB",
+    "team": "GB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 138,
+   "round": 14,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "11786",
+   "metadata": {
+    "first_name": "Cam",
+    "last_name": "Little",
+    "position": "K",
+    "team": "JAX",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 139,
+   "round": 14,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "8210",
+   "metadata": {
+    "first_name": "Chig",
+    "last_name": "Okonkwo",
+    "position": "TE",
+    "team": "TEN",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 140,
+   "round": 14,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "11576",
+   "metadata": {
+    "first_name": "Braelon",
+    "last_name": "Allen",
+    "position": "RB",
+    "team": "NYJ",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 141,
+   "round": 15,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "11637",
+   "metadata": {
+    "first_name": "Keon",
+    "last_name": "Coleman",
+    "position": "WR",
+    "team": "BUF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 142,
+   "round": 15,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "8676",
+   "metadata": {
+    "first_name": "Rashid",
+    "last_name": "Shaheed",
+    "position": "WR",
+    "team": "NO",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 143,
+   "round": 15,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "12495",
+   "metadata": {
+    "first_name": "Ollie",
+    "last_name": "Gordon",
+    "position": "RB",
+    "team": "MIA",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 144,
+   "round": 15,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "12541",
+   "metadata": {
+    "first_name": "Dont'e",
+    "last_name": "Thornton",
+    "position": "WR",
+    "team": "LV",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 145,
+   "round": 15,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "4195",
+   "metadata": {
+    "first_name": "Jake",
+    "last_name": "Elliott",
+    "position": "K",
+    "team": "PHI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 146,
+   "round": 15,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "1339",
+   "metadata": {
+    "first_name": "Zach",
+    "last_name": "Ertz",
+    "position": "TE",
+    "team": "WAS",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 147,
+   "round": 15,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "3214",
+   "metadata": {
+    "first_name": "Hunter",
+    "last_name": "Henry",
+    "position": "TE",
+    "team": "NE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 148,
+   "round": 15,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "12481",
+   "metadata": {
+    "first_name": "Cam",
+    "last_name": "Skattebo",
+    "position": "RB",
+    "team": "NYG",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 149,
+   "round": 15,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "7528",
+   "metadata": {
+    "first_name": "Najee",
+    "last_name": "Harris",
+    "position": "RB",
+    "team": "LAC",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 150,
+   "round": 15,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "9500",
+   "metadata": {
+    "first_name": "Josh",
+    "last_name": "Downs",
+    "position": "WR",
+    "team": "IND",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 151,
+   "round": 16,
+   "draft_slot": 10,
+   "roster_id": 3,
+   "player_id": "6650",
+   "metadata": {
+    "first_name": "Chase",
+    "last_name": "McLaughlin",
+    "position": "K",
+    "team": "TB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 152,
+   "round": 16,
+   "draft_slot": 9,
+   "roster_id": 2,
+   "player_id": "7042",
+   "metadata": {
+    "first_name": "Tyler",
+    "last_name": "Bass",
+    "position": "K",
+    "team": "BUF",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 153,
+   "round": 16,
+   "draft_slot": 8,
+   "roster_id": 8,
+   "player_id": "9494",
+   "metadata": {
+    "first_name": "Marvin",
+    "last_name": "Mims",
+    "position": "WR",
+    "team": "DEN",
+    "injury_status": "Questionable"
+   }
+  },
+  {
+   "pick_no": 154,
+   "round": 16,
+   "draft_slot": 7,
+   "roster_id": 6,
+   "player_id": "4988",
+   "metadata": {
+    "first_name": "Nick",
+    "last_name": "Chubb",
+    "position": "RB",
+    "team": "HOU",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 155,
+   "round": 16,
+   "draft_slot": 6,
+   "roster_id": 4,
+   "player_id": "GB",
+   "metadata": {
+    "first_name": "Green Bay",
+    "last_name": "Packers",
+    "position": "DEF",
+    "team": "GB",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 156,
+   "round": 16,
+   "draft_slot": 5,
+   "roster_id": 10,
+   "player_id": "12457",
+   "metadata": {
+    "first_name": "Jaydon",
+    "last_name": "Blue",
+    "position": "RB",
+    "team": "DAL",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 157,
+   "round": 16,
+   "draft_slot": 4,
+   "roster_id": 7,
+   "player_id": "5095",
+   "metadata": {
+    "first_name": "Daniel",
+    "last_name": "Carlson",
+    "position": "K",
+    "team": "LV",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 158,
+   "round": 16,
+   "draft_slot": 3,
+   "roster_id": 1,
+   "player_id": "8143",
+   "metadata": {
+    "first_name": "Jerome",
+    "last_name": "Ford",
+    "position": "RB",
+    "team": "CLE",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 159,
+   "round": 16,
+   "draft_slot": 2,
+   "roster_id": 9,
+   "player_id": "11589",
+   "metadata": {
+    "first_name": "Trey",
+    "last_name": "Benson",
+    "position": "RB",
+    "team": "ARI",
+    "injury_status": ""
+   }
+  },
+  {
+   "pick_no": 160,
+   "round": 16,
+   "draft_slot": 1,
+   "roster_id": 5,
+   "player_id": "4227",
+   "metadata": {
+    "first_name": "Harrison",
+    "last_name": "Butker",
+    "position": "K",
+    "team": "KC",
+    "injury_status": ""
+   }
+  }
+ ]
+}
