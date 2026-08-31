@@ -22,6 +22,7 @@ describe a program nobody is drafting with. So `Roster`, `ValueDrafter` and
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from dataclasses import dataclass, field
@@ -49,7 +50,14 @@ CONFIG = ROOT / "config" / "league.yaml"
 # `picks_until_next_turn` is re-exported: it lived here first and callers import
 # it from here. The implementation is the simulator's, so the live monitor and
 # the backtest can never disagree about whose turn it is.
-__all__ = ["picks_until_next_turn", "draft_state", "render", "run", "DraftState"]
+__all__ = ["picks_until_next_turn", "draft_state", "render", "run", "DraftState",
+           "scoring_mismatch", "default_html_path"]
+
+# Sleeper's own vocabulary for a draft's scoring format, from `draft.metadata`.
+# This is frequently the *only* place a mock draft (`league_id: null`, no
+# scoring_settings anywhere) records its scoring at all.
+_SCORING_TYPE_REC = {"std": 0.0, "standard": 0.0, "half_ppr": 0.5, "ppr": 1.0}
+_REC_LABEL = {0.0: "standard", 0.5: "half-PPR", 1.0: "full PPR"}
 
 
 @dataclass
@@ -180,6 +188,53 @@ def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
     return state
 
 
+def _draft_rec_value(draft: dict) -> float | None:
+    """Points per reception this Sleeper draft is scored under, or None if the
+    draft does not say (an unusual scoring_type string)."""
+    scoring_type = str((draft.get("metadata") or {}).get("scoring_type") or "").lower()
+    if not scoring_type:
+        return None
+    if "half" in scoring_type:
+        return 0.5
+    if "ppr" in scoring_type:
+        return 1.0
+    return _SCORING_TYPE_REC.get(scoring_type, 0.0)
+
+
+def scoring_mismatch(board_meta: dict, draft: dict, *,
+                     tol: float = 0.1) -> str | None:
+    """None if the board and this draft room agree on points-per-reception,
+    else a one-line explanation of the disagreement.
+
+    A board built for full PPR and used in a standard room misprices every
+    reception by a point — the WR the board loves at pick 16 is priced for a
+    game that is not being played, VORP and every ADP delta included. Silent,
+    and exactly the class of bug this project keeps finding (see the `PK`/`K`
+    position alias in CLAUDE.md): a small mismatch between two sources' spelling
+    of the same thing, invisible until you look for it, and expensive when you
+    don't. This is what happened testing against a mock draft that turned out
+    to be standard-scored: the board never noticed and neither did anyone
+    reading it.
+
+    `board_meta` is the sidecar `draft_board.meta.json` `export()` writes —
+    empty or missing means "cannot check", not "no mismatch".
+    """
+    board_rec = board_meta.get("rec_value")
+    draft_rec = _draft_rec_value(draft)
+    if board_rec is None or draft_rec is None:
+        return None
+    if abs(float(board_rec) - draft_rec) <= tol:
+        return None
+
+    def fmt(v: float) -> str:
+        return _REC_LABEL.get(v, f"{v:g} pt/reception")
+
+    return (f"board is priced for {fmt(float(board_rec))} but this draft room "
+           f"is {fmt(draft_rec)} — every reception is worth a different amount "
+           f"than the board assumes. Treat VORP and ADP deltas as directional "
+           f"only, especially at WR.")
+
+
 def _line(row: pd.Series) -> str:
     delta = row.get("adp_delta")
     tag = ""
@@ -190,9 +245,15 @@ def _line(row: pd.Series) -> str:
 
 
 def render(state: DraftState, *, top_n: int = 8,
-           caps: dict[str, int] | None = None) -> str:
+           caps: dict[str, int] | None = None,
+           scoring_warning: str | None = None) -> str:
     """The per-pick display, as a string so it can be asserted on."""
     out: list[str] = ["=" * 66]
+
+    # Repeated on every poll, not just at startup — a warning that scrolled off
+    # screen an hour ago might as well not exist during a live draft.
+    if scoring_warning:
+        out.append(f"  !! SCORING MISMATCH: {scoring_warning}")
 
     if state.complete:
         head = f"pick {state.made}/{state.total} · draft complete"
@@ -252,9 +313,21 @@ def render(state: DraftState, *, top_n: int = 8,
 def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
         interval: float = 5.0, top_n: int = 8,
         shape: LeagueShape | None = None, caps: dict[str, int] | None = None,
-        html_path: Path | None = None, expect_user_id: str | None = None
-        ) -> None:
+        html_path: Path | None = None, expect_user_id: str | None = None,
+        board_meta: dict | None = None) -> None:
     interval = max(MIN_POLL_S, interval)
+
+    # Redirecting stdout to a file (or a task runner's log capture) switches
+    # Python from line-buffering to full 4KB block-buffering. A monitor that
+    # prints maybe 200 bytes a pick can then sit for fifteen picks with zero
+    # bytes on disk, looking exactly like a hang. Line-buffer explicitly rather
+    # than rely on the terminal to save us; `reconfigure` can fail on a stream
+    # that isn't a real TextIOWrapper (e.g. under some test/capture setups),
+    # which is not worth stopping the draft over.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
     draft = get_draft(draft_id) or {}
     settings = draft.get("settings") or {}
@@ -282,12 +355,19 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
                             starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1,
                                       "K": 1, "DEF": 1})
 
+    warning = scoring_mismatch(board_meta or {}, draft)
+
     print(f"draft {draft_id} · {teams} teams · {rounds} rounds · "
           f"your slot {my_slot}")
     if caps:
         print("  caps: " + ", ".join(f"{k} {v}" for k, v in sorted(caps.items())))
     if html_path:
         print(f"  live board: {html_path}")
+    if warning:
+        # Loud and up front, not just folded into the per-pick render — this is
+        # the moment someone is most likely to still be watching the terminal
+        # rather than glancing at it between picks.
+        print(f"\n  {'!' * 60}\n  SCORING MISMATCH\n  {warning}\n  {'!' * 60}\n")
     print(f"polling every {interval:.0f}s. ctrl-c to stop.\n")
 
     last: set[str] | None = None
@@ -308,7 +388,8 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
         # terminal.
         if last is None or state.drafted != last:
             last = state.drafted
-            print(render(state, top_n=top_n, caps=caps))
+            print(render(state, top_n=top_n, caps=caps,
+                        scoring_warning=warning))
             if html_path:
                 try:
                     refresh_html(board, html_path, state.drafted,
@@ -322,6 +403,36 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
         time.sleep(interval)
 
 
+def default_html_path(board_path: Path, *, draft_id: str,
+                      current_draft_id: str | None) -> tuple[Path, str | None]:
+    """Where the live board goes when `--html` was not given.
+
+    Returns `(path, note)`. `note` is non-None exactly when the default was
+    steered away from the real board's HTML and should be printed — silently
+    picking a safe path is barely better than not picking one, since the whole
+    failure mode is someone not noticing which file is being written.
+
+    Only `--draft-id` matching the *configured real draft* gets the real path.
+    Everything else — a mock, a rehearsal, a typo, no config at all — gets a
+    sibling `.mock.html` instead. This is the direction the default was wrong
+    in: testing against a mock draft silently overwrote the actual draft-day
+    artifact for fifteen picks before anyone noticed. Getting it backwards the
+    other way just costs a `--html` flag on the one day it matters.
+    """
+    real_path = board_path.with_suffix(".html")
+    is_real = (current_draft_id is not None
+              and str(draft_id) == str(current_draft_id))
+    if is_real:
+        return real_path, None
+
+    mock_path = board_path.with_name(board_path.stem + ".mock.html")
+    note = (f"--draft-id {draft_id} does not match config current.draft_id "
+           f"({current_draft_id or 'unset'}); writing the live board to "
+           f"{mock_path.name} instead of {real_path.name} so a practice draft "
+           f"cannot overwrite the real one. Pass --html to override.")
+    return mock_path, note
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Live Sleeper draft monitor")
     ap.add_argument("--draft-id", required=True)
@@ -331,10 +442,11 @@ def main() -> int:
     ap.add_argument("--no-html", action="store_true",
                     help="do not rewrite the phone board as picks come in")
     ap.add_argument("--html", default=None,
-                    help="where to write the live phone board "
-                         "(default: alongside --board). Point this somewhere "
-                         "else when practising on a mock, so the real board "
-                         "is not left covered in mock picks.")
+                    help="where to write the live phone board. Default: the "
+                         "real board's HTML only when --draft-id matches "
+                         "config current.draft_id, otherwise a sibling "
+                         "*.mock.html so a practice draft never overwrites "
+                         "the real one.")
     args = ap.parse_args()
 
     path = Path(args.board)
@@ -348,21 +460,39 @@ def main() -> int:
 
     board = pd.read_parquet(path)
 
+    board_meta: dict = {}
+    meta_path = path.with_suffix(".meta.json")
+    if meta_path.exists():
+        try:
+            board_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"  [warn] could not read {meta_path}: {exc}")
+
     shape = None
     caps = None
     user_id = None
+    current_draft_id = None
     if CONFIG.exists():
         cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
         shape = LeagueShape.from_config(cfg)
         caps = (cfg.get("draft_policy", {}) or {}).get("position_caps") or None
         user_id = (cfg.get("user", {}) or {}).get("sleeper_user_id")
+        current_draft_id = (cfg.get("current", {}) or {}).get("draft_id")
 
-    html_path = None if args.no_html else Path(args.html or path.with_suffix(".html"))
+    if args.no_html:
+        html_path = None
+    elif args.html:
+        html_path = Path(args.html)
+    else:
+        html_path, note = default_html_path(
+            path, draft_id=args.draft_id, current_draft_id=current_draft_id)
+        if note:
+            print(f"note: {note}")
 
     try:
         run(args.draft_id, board, args.my_slot, interval=args.interval,
             shape=shape, caps=caps, html_path=html_path,
-            expect_user_id=user_id)
+            expect_user_id=user_id, board_meta=board_meta)
     except KeyboardInterrupt:
         print("\nstopped.")
     except ValueError as exc:

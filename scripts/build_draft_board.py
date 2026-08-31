@@ -167,6 +167,10 @@ def assemble(cfg: dict, *, refresh: bool = False, league_id: str | None = None,
         "teams": shape.teams,
         "scoring": "PPR" if scoring.is_full_ppr else "custom",
         "players": len(board),
+        # Points per reception the board is priced under. The one number the
+        # live monitor needs to catch a room that scores differently — see
+        # `draft.monitor.scoring_mismatch`.
+        "rec_value": scoring.get("rec"),
     }
     return board, excluded, meta
 

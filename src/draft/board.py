@@ -130,7 +130,15 @@ def positional_run(recent_picks: list[dict], window: int = 6,
 def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
            *, stem: str = "draft_board", meta: dict | None = None,
            drafted: set | None = None) -> dict[str, Path]:
-    """Write parquet + CSV + HTML. Returns the paths written."""
+    """Write parquet + CSV + HTML + a meta sidecar. Returns the paths written.
+
+    The sidecar (`<stem>.meta.json`) exists because parquet and CSV carry only
+    the table — nothing about *how* the board was built. The live monitor needs
+    to know the scoring format the board was priced under (full PPR, in this
+    league) so it can compare that against the draft room it is pointed at and
+    warn if they disagree; without a durable record of it, that comparison is
+    impossible once the process that built the board has exited.
+    """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -138,11 +146,14 @@ def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
         "parquet": out / f"{stem}.parquet",
         "csv": out / f"{stem}.csv",
         "html": out / f"{stem}.html",
+        "meta": out / f"{stem}.meta.json",
     }
     board.to_parquet(paths["parquet"], index=False)
     board.to_csv(paths["csv"], index=False)
     paths["html"].write_text(
         _render_html(board, meta or {}, drafted=drafted), encoding="utf-8")
+    paths["meta"].write_text(json.dumps(meta or {}, indent=2, default=str),
+                             encoding="utf-8")
     return paths
 
 

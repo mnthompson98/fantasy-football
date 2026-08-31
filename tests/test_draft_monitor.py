@@ -390,12 +390,13 @@ def test_defenses_reconcile_by_team_abbreviation(feed, board):
 # The one input error the monitor cannot detect for itself
 # --------------------------------------------------------------------------
 
-def _stub_draft(monkeypatch, feed, *, draft_order=None):
+def _stub_draft(monkeypatch, feed, *, draft_order=None, metadata=None):
     """Point the monitor at the fixture instead of Sleeper."""
     import src.draft.monitor as M
 
     monkeypatch.setattr(M, "get_draft", lambda _id: {
-        "settings": feed["settings"], "draft_order": draft_order or {}})
+        "settings": feed["settings"], "draft_order": draft_order or {},
+        "metadata": metadata or {}})
     monkeypatch.setattr(M, "get_draft_picks", lambda _id: feed["picks"])
     monkeypatch.setattr(M.time, "sleep", lambda _s: None)
     return M
@@ -455,3 +456,110 @@ def test_run_writes_the_live_board_as_picks_arrive(monkeypatch, feed, board,
     M.run("d", board, 4, html_path=html)
     assert _baked_drafted(html.read_text(encoding="utf-8")) == {
         str(p["player_id"]) for p in feed["picks"]}
+
+
+# --------------------------------------------------------------------------
+# Output buffering — the monitor looked dead for fifteen picks in a mock draft
+# because redirecting stdout switches Python from line- to block-buffering
+# --------------------------------------------------------------------------
+
+def test_run_line_buffers_stdout_even_when_redirected(monkeypatch, feed, board,
+                                                       capsys):
+    """`run()` must not depend on the caller's stream already being line
+    buffered. pytest's capsys stand-in is itself not a real TextIOWrapper, so
+    this also exercises the fallback path when `.reconfigure` is unavailable —
+    reproducing the crash that path guards against would fail every other test
+    in this file, since they all run under capsys."""
+    M = _stub_draft(monkeypatch, feed)
+    M.run("d", board, 4, html_path=None)
+    assert "draft complete." in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# Scoring mismatch — a board priced for one point per reception used in a
+# room scored at zero misprices every receiver, silently
+# --------------------------------------------------------------------------
+
+def test_full_ppr_board_in_a_standard_room_is_flagged():
+    from src.draft.monitor import scoring_mismatch
+    warning = scoring_mismatch(
+        {"rec_value": 1.0}, {"metadata": {"scoring_type": "std"}})
+    assert warning is not None
+    assert "full PPR" in warning and "standard" in warning
+
+
+def test_matching_scoring_is_not_flagged():
+    from src.draft.monitor import scoring_mismatch
+    assert scoring_mismatch(
+        {"rec_value": 1.0}, {"metadata": {"scoring_type": "ppr"}}) is None
+
+
+def test_half_ppr_room_is_distinguished_from_both_ends():
+    from src.draft.monitor import scoring_mismatch
+    assert scoring_mismatch(
+        {"rec_value": 1.0}, {"metadata": {"scoring_type": "half_ppr"}}) is not None
+    assert scoring_mismatch(
+        {"rec_value": 0.5}, {"metadata": {"scoring_type": "half_ppr"}}) is None
+
+
+def test_a_missing_scoring_type_is_not_a_mismatch():
+    """Cannot check is not the same claim as no mismatch — but it must not
+    invent a warning from nothing, either."""
+    from src.draft.monitor import scoring_mismatch
+    assert scoring_mismatch({"rec_value": 1.0}, {"metadata": {}}) is None
+    assert scoring_mismatch({}, {"metadata": {"scoring_type": "std"}}) is None
+
+
+def test_the_live_run_prints_the_mismatch_warning_up_front_and_every_poll(
+        monkeypatch, feed, board, capsys):
+    M = _stub_draft(monkeypatch, feed, metadata={"scoring_type": "std"})
+    M.run("d", board, 4, html_path=None, board_meta={"rec_value": 1.0})
+    out = capsys.readouterr().out
+    assert out.count("SCORING MISMATCH") >= 2   # startup banner + per-poll
+
+
+def test_no_board_meta_means_no_warning(monkeypatch, feed, board, capsys):
+    """A board built before this feature shipped has no meta.json; the monitor
+    must degrade to silent, not crash."""
+    M = _stub_draft(monkeypatch, feed, metadata={"scoring_type": "std"})
+    M.run("d", board, 4, html_path=None, board_meta=None)
+    assert "SCORING MISMATCH" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# The --html default — must never silently clobber the real draft-day board
+# --------------------------------------------------------------------------
+
+def test_the_real_draft_id_gets_the_real_html_path():
+    from src.draft.monitor import default_html_path
+    path, note = default_html_path(
+        Path("outputs/projections/draft_board.parquet"),
+        draft_id="1389723592727461889",
+        current_draft_id="1389723592727461889")
+    assert path.name == "draft_board.html"
+    assert note is None
+
+
+def test_a_mismatched_draft_id_gets_a_mock_path_and_a_note():
+    """This is the bug found live: monitoring a mock draft with the real
+    board's default --html clobbered outputs/projections/draft_board.html for
+    fifteen picks before anyone noticed."""
+    from src.draft.monitor import default_html_path
+    path, note = default_html_path(
+        Path("outputs/projections/draft_board.parquet"),
+        draft_id="1400268868273876992",
+        current_draft_id="1389723592727461889")
+    assert path.name == "draft_board.mock.html"
+    assert note is not None and "1400268868273876992" in note
+
+
+def test_no_configured_draft_id_defaults_to_the_safe_path():
+    """Cannot verify this is the real draft -> treat it as not the real draft.
+    Being wrong in this direction costs a --html flag; being wrong the other
+    way costs the draft-day artifact."""
+    from src.draft.monitor import default_html_path
+    path, note = default_html_path(
+        Path("outputs/projections/draft_board.parquet"),
+        draft_id="anything", current_draft_id=None)
+    assert path.name == "draft_board.mock.html"
+    assert note is not None
