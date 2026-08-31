@@ -204,7 +204,14 @@ def preseason_ecr(rankings: pd.DataFrame, season: int, cw, *,
     matched = matched.sort_values("ecr")
     matched["adp_rank"] = range(1, len(matched) + 1)
     matched["pos_rank"] = matched.groupby("position")["ecr"].rank(method="first")
-    matched = matched.rename(columns={"player": "player_name"})
+    # Carry the consensus *disagreement* through, not just its centre. Two
+    # players with the same ECR are different bets when one has a best/worst of
+    # 1/8 and the other 1/40: the second is a player the room cannot agree on,
+    # which is where both the value and the blowups live.
+    matched = matched.rename(columns={
+        "player": "player_name",
+        "sd": "ecr_sd", "best": "ecr_best", "worst": "ecr_worst",
+    })
     if "bye" in matched.columns:
         matched = matched.rename(columns={"bye": "bye_week"})
 

@@ -32,6 +32,9 @@ BOARD_COLUMNS = [
     # What pure VORP thought before the market got a vote, and how hard the
     # market was allowed to vote. K and DEF are anchored; everyone else is 0.
     "vorp_unanchored", "market_anchor",
+    # How much the experts disagree. A tight best/worst is a consensus player;
+    # a wide one is contested, which is where both the value and the busts are.
+    "ecr_sd", "ecr_best", "ecr_worst",
 ]
 
 
@@ -228,6 +231,10 @@ function render() {{
     // the gap between them — have to be visible without scrolling sideways.
     const bits = [r.nfl_team || '—'];
     if (num(r.bye_week, 0) !== '—') bits.push('bye ' + num(r.bye_week, 0));
+    // Expert range. Wide means contested, which is a different bet from a
+    // consensus pick at the same rank — worth seeing before you spend a pick.
+    if (num(r.ecr_best, 0) !== '—' && num(r.ecr_worst, 0) !== '—')
+      bits.push(num(r.ecr_best, 0) + '–' + num(r.ecr_worst, 0));
     const sub = bits.join(' · ');
     const soft = String(r.injury_status) === 'Questionable' ? ' soft' : '';
     const inj = r.injury_status

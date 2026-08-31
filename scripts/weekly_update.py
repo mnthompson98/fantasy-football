@@ -25,13 +25,14 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.features.lineup import LineupSlots  # noqa: E402
-from src.inseason import start_sit, trades, waivers  # noqa: E402
+from src.inseason import matchup, report, start_sit, trades, waivers  # noqa: E402
 from src.inseason.projections import (  # noqa: E402
     attach_projections,
     load_weekly_projections,
 )
 from src.inseason.roster import load_league_state  # noqa: E402
 from src.ingest import nflverse as nv  # noqa: E402
+from src.ingest.injuries import apply_to_roster, weekly_report  # noqa: E402
 from src.ingest.player_ids import build_crosswalk  # noqa: E402
 from src.ingest.sleeper_api import get_players, get_trending  # noqa: E402
 
@@ -98,6 +99,10 @@ def main() -> int:
                     help="verify weekly ingestion and stop")
     ap.add_argument("--waiver-threshold", type=float, default=None,
                     help="points a claim must add before it is worth priority")
+    ap.add_argument("--week", type=int, default=None,
+                    help="NFL week (default: latest with an injury report)")
+    ap.add_argument("--out", default="outputs/reports",
+                    help="where to write the markdown report")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
@@ -131,6 +136,29 @@ def main() -> int:
         return 0
 
     roster = attach_projections(state.my_roster, proj)
+
+    # The official weekly injury report is the in-season authority. Sleeper's
+    # season-long designations (IR, PUP) still gate on top of it — the two
+    # sources cover different things and neither replaces the other.
+    season = nv._current_season()
+    inj = weekly_report(season, args.week)
+    week = args.week
+    if week is None and not inj.empty:
+        week = int(inj["report_week"].max())
+    if not inj.empty:
+        roster = apply_to_roster(roster, inj)
+        flagged = int((roster["concern"] != "clear").sum())
+        print(f"  injury report: week {week} · {len(inj)} listed · "
+              f"{flagged} on your roster")
+    else:
+        print("  injury report: none published yet (preseason)")
+
+    # Market and weather context. Flags only — see matchup.py for why these
+    # must not be used to adjust the projections.
+    ctx = matchup.week_context(season, week) if week else pd.DataFrame()
+    if not ctx.empty:
+        roster = matchup.attach(roster, ctx)
+
     print(f"\n{'=' * 62}\nSTART / SIT\n{'=' * 62}")
     lineup, calls, holes = start_sit.recommend(roster, slots)
     for row in lineup.starters.itertuples():
@@ -157,6 +185,16 @@ def main() -> int:
         key = cw.resolve(sleeper_id=entry.get("player_id"))
         if key:
             trending[key] = int(entry.get("count") or 0)
+
+    # Drops are the other half of the plan's "trending adds/drops". They are not
+    # a waiver signal — a player being dropped everywhere is available, not
+    # good. They are a *trade* signal: the leagues giving up on him are telling
+    # you where the buy-low is, if you disagree with them.
+    dropped = {}
+    for entry in get_trending("drop", limit=100):
+        key = cw.resolve(sleeper_id=entry.get("player_id"))
+        if key:
+            dropped[key] = int(entry.get("count") or 0)
 
     threshold = args.waiver_threshold
     if threshold is None:
@@ -187,6 +225,32 @@ def main() -> int:
             print(f"  {str(row.position):<4}{str(row.player_name)[:26]:<27}"
                   f"proj {shown}")
         print("\n  Evaluate a specific offer with src.inseason.trades.evaluate().")
+
+    # Buy-low candidates: rostered elsewhere in *this* league, and being dropped
+    # in leagues at large. If you disagree with the panic, that is the trade.
+    panic = [(k, n) for k, n in sorted(dropped.items(), key=lambda kv: -kv[1])
+             if k in state.all_rostered and k not in set(roster["player_key"])]
+    if panic:
+        print(f"\n{'=' * 62}\nBUY-LOW  (owned here, being dropped elsewhere)\n{'=' * 62}")
+        for key, count in panic[:6]:
+            meta = cw.meta.get(key, {})
+            print(f"  {str(meta.get('position') or '?'):<4}"
+                  f"{str(meta.get('player_name') or key)[:26]:<27}"
+                  f"dropped in {count:,} leagues · owned by "
+                  f"{state.owner_of.get(key, '?')}")
+
+    out_dir = ROOT / args.out
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md = report.build(
+        week=week, season=season, lineup=lineup, calls=calls, holes=holes,
+        slots=slots, moves=moves, waiver_threshold=threshold,
+        surplus=surplus, roster=roster,
+        scrape_date=str(proj["scrape_date"].max()) if len(proj) else None,
+        league_name=str((cfg.get("current") or {}).get("name") or ""),
+    )
+    path = out_dir / (f"week{week:02d}.md" if week else "preseason.md")
+    path.write_text(md, encoding="utf-8")
+    print(f"\nreport written: {path.relative_to(ROOT)}")
 
     return 0
 

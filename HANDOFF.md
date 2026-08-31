@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30
 **Repo:** https://github.com/mnthompson98/fantasy-football
 **Branch:** main
-**Tests:** 143/143 passing on Python 3.14
+**Tests:** 153/153 passing on Python 3.14
 **2026 league:** `Camden?` · league `1389723592727461888` · draft `1389723592727461889` · 10 teams · 16 rounds · snake · pre_draft
 
 ---
@@ -151,6 +151,85 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
    `trades.py`, driven by `scripts/weekly_update.py`. **Unvalidated by
    construction:** the weekly FantasyPros feed is a live snapshot with no
    archive, so unlike the draft board none of it can be backtested.
+
+---
+
+## Audit against the original plan
+
+Checked item by item, 2026-08-31.
+
+### "By Thursday" — all five shipped
+
+| Plan item | State |
+|---|---|
+| 1. nflverse seasonal/weekly + xFP + FantasyPros ranks | ✅ `ingest/nflverse.py` |
+| 2. Full-PPR VORP cheat sheet, exact roster settings | ✅ verified against the live 2026 league |
+| 3. Blend with consensus (aggregation > solo model) | ✅ `features/blend.py` |
+| 4. Injury/roster hard filter (Sleeper **+ nflverse**) | ✅ — see note below |
+| 5. Live draft-day poll of `/draft/{id}/picks` | ✅ `draft/monitor.py`, verified on the real 2025 draft |
+
+**On "Sleeper + nflverse":** these cover different phases and neither replaces
+the other. nflverse's injury report starts at **week 1** and does not exist for
+2026 at all yet, so at draft time Sleeper is the only live source — it is what
+carries IR/PUP/NFI/suspended. nflverse becomes the authority once games are
+played, and `ingest/injuries.py` now supplies it to the weekly run.
+
+### "Weeks 1–3" — shipped, with one scope correction
+
+| Plan item | State |
+|---|---|
+| Walk-forward backtester + draft simulator | ✅ |
+| Validate on **2019–2025** | ⚠️ **2022–2025 only** |
+| Wire up weekly ingestion | ✅ + `--check-only` health check |
+
+**The 2019–2021 folds are not obtainable.** ffverse's preseason `redraft-overall`
+ECR archive begins in 2021, and the one-season purge gap costs another, so the
+earliest targetable season is 2022. Four folds, not seven. Everything concluded
+from the backtest rests on that sample — it is the single biggest limitation in
+the project and no amount of further tuning changes it.
+
+### "Weeks 4+" — partially shipped
+
+| Plan item | State |
+|---|---|
+| Calibration | ✅ and *measured*, not assumed (found RB/WR priors inverted) |
+| Uncertainty ranges | ✅ ECR `sd`/`best`/`worst` on the board; weekly `sd` drives start/sit toss-ups |
+| Weekly automation | ✅ `scripts/schedule_weekly.py` (Task Scheduler / cron) |
+| **ML projection model** | ❌ **not built** |
+| **Injury-risk feature** | ❌ **not built** |
+
+The ML model must beat the blend out-of-sample to ship at all (CLAUDE.md), and
+it would be validated on those same four folds. That is a weak basis for
+adopting a model over a consensus blend, and worth knowing before starting.
+
+### In-season automation — shipped
+
+Every element of the scheduled job the plan describes:
+
+| Plan item | State |
+|---|---|
+| Runs Tue night / Wed morning | ✅ `schedule_weekly.py`, default TUE 20:00 |
+| Injuries **+ practice reports** | ✅ practice participation drives the `risky` flag |
+| Trending adds **and drops** | ✅ adds → waivers; drops → buy-low trade targets |
+| This week's matchups / odds / weather | ✅ implied team total, wind, cold, dome |
+| Recomputes projections | ✅ weekly FantasyPros points |
+| Recomputes **VORP** | ◑ see note |
+| Emits a markdown report | ✅ `outputs/reports/weekNN.md` |
+
+**Two deliberate departures from the plan, both worth arguing with:**
+
+1. **Odds and weather are flags, not adjustments.** The obvious move is to nudge
+   projections for a high total or a windy game. Don't: the FantasyPros experts
+   who made those projections had already seen the spread and the forecast, so
+   adjusting on top double-counts the matchup and makes the number worse. The
+   context explains a number you are about to act on; it does not modify it.
+
+2. **VORP is not recomputed weekly, because in-season it is the wrong quantity.**
+   VORP prices a player against a *draftable replacement* — the right question in
+   August. In week 6 the question is whether he improves *your* starting lineup
+   this Sunday, which is what `features/lineup.py` computes and what every weekly
+   recommendation is built on. Recomputing VORP would produce a number nothing
+   should act on.
 
 ---
 

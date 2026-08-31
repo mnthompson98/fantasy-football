@@ -258,3 +258,101 @@ def test_trading_away_the_only_quarterback_is_flagged_as_thinning():
 def test_surplus_is_exactly_the_players_the_lineup_does_not_need():
     surplus = set(trades.find_surplus(_full_roster(), SLOTS)["player_name"])
     assert surplus == {"RBc"}, surplus
+
+
+# --------------------------------------------------------------------------
+# Injury report — the two sources cover different phases
+# --------------------------------------------------------------------------
+
+from src.ingest.injuries import DNP, FULL, apply_to_roster, concern  # noqa: E402
+from src.inseason import matchup, report  # noqa: E402
+
+
+def test_questionable_without_practice_is_riskier_than_questionable_with():
+    """The distinction people miss: game status alone treats these the same."""
+    assert concern("Questionable", DNP) == "risky"
+    assert concern("Questionable", FULL) == "monitor"
+
+
+def test_out_and_doubtful_both_mean_do_not_start():
+    assert concern("Out", FULL) == "out"
+    assert concern("Doubtful", FULL) == "doubtful"
+
+
+def test_a_clean_player_is_clear():
+    assert concern(None, FULL) == "clear"
+
+
+def test_the_injury_report_never_re_enables_a_player_sleeper_has_on_ir():
+    roster = pd.DataFrame([
+        {"player_key": "a", "player_name": "OnIR", "position": "WR",
+         "projection": 12.0, "available": False},
+    ])
+    rep = pd.DataFrame([{"player_key": "a", "report_status": None,
+                         "practice_status": FULL, "injury": None,
+                         "report_week": 5}])
+    out = apply_to_roster(roster, rep)
+    assert not bool(out["available"].iloc[0])
+
+
+def test_an_out_designation_removes_a_player_from_the_lineup():
+    roster = pd.DataFrame([
+        {"player_key": "a", "player_name": "Hurt", "position": "WR",
+         "projection": 20.0, "available": True},
+    ])
+    rep = pd.DataFrame([{"player_key": "a", "report_status": "Out",
+                         "practice_status": DNP, "injury": "Hamstring",
+                         "report_week": 5}])
+    assert not bool(apply_to_roster(roster, rep)["available"].iloc[0])
+
+
+# --------------------------------------------------------------------------
+# Matchup context — flags only, never an adjustment
+# --------------------------------------------------------------------------
+
+def test_implied_total_splits_the_game_total_by_the_spread():
+    row = {"roof": "outdoors", "wind": 5, "temp": 60, "implied_total": 28.0}
+    # Home favoured by 3 in a 47-point game implies 25 for the home side.
+    assert (47.0 / 2 + 3.0 / 2) == pytest.approx(25.0)
+    assert "high total" in matchup._flags(row)
+
+
+def test_a_dome_never_gets_a_weather_flag():
+    row = {"roof": "dome", "wind": 30, "temp": 5, "implied_total": 23.0}
+    assert matchup._flags(row) == ""
+
+
+def test_wind_and_cold_are_flagged_outdoors():
+    row = {"roof": "outdoors", "wind": 22, "temp": 18, "implied_total": 22.0}
+    flags = matchup._flags(row)
+    assert "wind" in flags and "°F" in flags
+
+
+# --------------------------------------------------------------------------
+# Report rendering
+# --------------------------------------------------------------------------
+
+def test_missing_values_never_render_as_the_string_nan():
+    """A pandas merge leaves NaN where nothing matched, and `str(nan)` is
+    literally "nan" — which is how a lineup table ends up full of them."""
+    assert report._text(float("nan")) == ""
+    assert report._text(None) == ""
+    assert report._text("NaN") == ""
+    assert report._text("at CIN") == "at CIN"
+
+
+def test_the_report_leads_with_the_unvalidated_warning():
+    lineup_df = pd.DataFrame([{
+        "slot": "QB", "player_name": "Someone", "position": "QB",
+        "projection": 20.0, "opponent": "at NYJ",
+    }])
+    from src.features.lineup import Lineup
+    md = report.build(
+        week=5, season=2026,
+        lineup=Lineup(starters=lineup_df, bench=lineup_df.iloc[0:0], points=20.0),
+        calls=[], holes=[], slots=SLOTS, moves=[], waiver_threshold=4.0,
+        surplus=lineup_df.iloc[0:0], roster=lineup_df,
+    )
+    assert "unvalidated" in md.lower()
+    assert "Week 5" in md
+    assert "nan" not in md.lower().replace("unvalidated", "")
