@@ -396,7 +396,8 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
                    my_slot: int, starters: dict[str, int], flex_slots: int,
                    flex_eligible: tuple[str, ...], sigma: dict[str, float],
                    need_boost: float = 1.6, need_penalty: float = 0.4,
-                   value_col: str = "vorp", seed: int | None = None
+                   value_col: str = "vorp", seed: int | None = None,
+                   caps: dict[str, int] | None = None,
                    ) -> dict[int, Roster]:
     """Run one full snake draft.
 
@@ -422,7 +423,7 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
     }
 
     opponent = OpponentModel(sigma, need_boost, need_penalty, rng)
-    me = ValueDrafter(value_col)
+    me = ValueDrafter(value_col, caps=caps)
     my_team = my_slot - 1
 
     available = board.copy()

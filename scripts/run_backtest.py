@@ -69,6 +69,7 @@ def backtest_config(cfg: dict, *, drafts: int | None = None,
                for k, v in (opp.get("adp_sigma_fallback") or {}).items()},
         need_boost=float(opp.get("positional_need_boost", 1.6)),
         need_penalty=float(opp.get("positional_need_penalty", 0.4)),
+        caps=(cfg.get("draft_policy", {}).get("position_caps") or None),
     )
 
 

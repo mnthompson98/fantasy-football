@@ -141,30 +141,64 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
 
 ## Backtest baseline
 
-160 simulated drafts (40 per season, 2022-2025), varied slots and seeds,
-`--label fitted-slopes+dropoff`:
+160 simulated drafts per run (40 per season, 2022-2025), varied slots and seeds.
+5.50 is what a coin flip gets on league rank.
 
-| metric | first run | after the fixes below |
-|---|---|---|
-| league rank by points (of 10, lower better) | 6.60 | **4.90** |
-| win rate | 0.456 | **0.532** |
-| playoff points (weeks 15-17) | 355.8 | **389.9** |
-| season points | 2093 | **2200** |
+| label | scorer | rank | win% | playoff | season |
+|---|---|---|---|---|---|
+| `baseline-anchored` | old | 6.60 | 0.456 | 355.8 | 2093 |
+| `fitted-slopes+dropoff` | old | 4.90 | 0.532 | 389.9 | 2200 |
+| `caps-only-no-qbte-anchor` | old | 5.61 | 0.517 | 374.8 | 2167 |
+| `qb-te-anchor+caps` | old | 5.74 | 0.498 | 369.7 | 2141 |
+| **`caps+waiver-aware-scoring`** | **corrected** | **4.64** | **0.548** | **405.3** | **2294** |
+| `qbcap2+waiver-aware-CONTROL` | corrected | 4.73 | 0.528 | 411.1 | 2292 |
 
-5.50 is what a coin flip gets. The first run was meaningfully *worse* than an
-ADP-following field; it is now meaningfully better. Two fixes did it:
+**Rows under different scorers are not comparable to each other.** The corrected
+scorer credits every team for streaming, so absolute points rise for everyone;
+only same-scorer rows can be compared.
+
+What moved the needle, in order:
 
 1. **Calibration slopes fit from history** rather than the config's generic
    priors, which had RB and WR inverted (see CLAUDE.md).
-2. **The drafter values picks by drop-off**, on a points scale, rather than by
-   raw VORP.
+2. **The drafter values picks by drop-off**, on a points scale, not raw VORP.
+3. **Waiver-aware scoring.** See below — this was a measurement bug, not a
+   strategy improvement, and it was worth about a place in the standings.
 
-Per season: 2022 4.35, 2023 2.75, 2024 4.58, **2025 7.92**. 2025 is the one
-season it still loses badly, and nobody has looked at why. That is the most
-promising thread left.
+Tried and reverted: the QB/TE market anchor (cost 0.13 places).
 
-Caveat worth keeping in mind: the two fixes went in together and were measured
-together. Neither has been scored on its own.
+Per season under the shipping config: 2022 3.27, 2023 2.95, 2024 4.88,
+**2025 7.45**. 2025 is the one season it still loses badly and nobody has looked
+at why. That is the most promising thread left.
+
+### The scorer was punishing thin rosters for a missing feature
+
+`optimal_lineup_points` used to score an unfilled starting slot as zero. The
+simulator has no waiver wire, so a roster carrying one quarterback fielded
+**nobody** at QB 3.10 weeks a season (one bye plus injuries, against 0.85 weeks
+for a two-QB roster) and was charged the entire loss — about 75 QB points a
+year. A real manager streams a replacement for free.
+
+That made a one-QB strategy look 0.71 places worse than it is. It would have
+biased *every* roster-shape question the same way: "carry a second TE?", "how
+deep at RB?". An unfilled slot is now credited with what a freely-available
+player at that position actually scored that week — the median of the tier just
+below what the league rosters as starters (QB11-QB20 in a 10-team, 1-QB league),
+not the best available, which would assume foresight nobody has.
+
+### One QB costs nothing measurable
+
+With the scorer corrected, capping QB at 1 versus 2:
+
+| | rank | win% | playoff | season |
+|---|---|---|---|---|
+| QB cap 1 | 4.64 | 0.548 | 405.3 | 2294 |
+| QB cap 2 | 4.73 | 0.528 | 411.1 | 2292 |
+
+Mixed in direction and small in every case — cap 1 is ahead on rank and win
+rate, cap 2 on playoff points, season points a tie. Treat it as **no measurable
+difference over 160 drafts**, not as evidence either way. The entire apparent
+penalty on one-QB rosters was the scorer artifact.
 
 ---
 
@@ -229,22 +263,38 @@ Shrinking toward replacement level instead changed almost nothing, because the
 fitted slopes are near-uniform (0.68-0.72) and uniform scaling is
 rank-preserving. It was reverted rather than kept as an unjustified change.
 
-### 2b. The live question: QB and TE are overdrafted
+### 2b. SETTLED — the market was right about QB and TE
 
-The board takes ~9.5 QB and ~7.5 TE per season in its top 60; the market takes
-~5.75 and ~4. That ~7-slot overdraft is what squeezes out the backs.
+Realized value above that season's realized positional replacement, by board
+rank bucket, 2022-2025:
 
-Note the board's RB:WR *ratio* (0.65) is close to the market's (0.68) — so the
-8 WR / 2 RB rosters were the drafter compounding a smaller board error, not the
-board being receiver-mad.
+| bucket | QB | RB | WR | TE |
+|---|---|---|---|---|
+| 1–24 | **+19** | +62 | +55 | +57 |
+| 25–48 | **−12** | +45 | +2 | −5 |
+| 49–72 | **−71** | +9 | −24 | −5 |
 
-**Nobody has established whether the board or the market is right about QB/TE.**
-The test to run: realized value-above-replacement for the board's top-60
-selection versus ADP's top-60 selection, per position. If the board's QBs
-genuinely deliver more points above QB replacement than the market's extra
-RB/WR do above theirs, the board is right and the market is wrong. Since the
-error survives ECR-only, it lives in the rank curve or the replacement levels —
-`fit_rank_curve` and `replacement_ranks` are where to look.
+The same table by ADP rank is roughly level (1–24: QB +64, RB +59, WR +53,
+TE +93), which is what a well-calibrated cross-position ranking looks like. The
+board was putting ~4.75 QB per season into its top 24 and they returned a third
+of what everything else at the same rank returned.
+
+Fixed by extending `market_anchor` to QB (0.6) and TE (0.5) — the same machinery
+K and DEF use, for a different reason: not streamability, but that our
+cross-position pricing of them is measurably worse than the market's. The 2026
+board's top-60 mix now matches ADP almost exactly:
+
+| | WR | RB | QB | TE |
+|---|---|---|---|---|
+| board | 29 | 20 | 6 | 5 |
+| ADP | 29 | 21 | 6 | 4 |
+
+Josh Allen still sits at board 20 against ADP 26 — the one quarterback the board
+is allowed to like more than the room does.
+
+**The two anchor weights are a reasoned starting point, not a fitted result.**
+Four folds cannot tune them. If you revisit, change one and compare labelled
+runs rather than eyeballing a board.
 
 ### 3. The rank curve conflates projected rank with finish rank
 

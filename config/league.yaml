@@ -157,13 +157,54 @@ calibration:
 #
 # `vorp_unanchored` is preserved on the board so you can always see what pure
 # VORP thought before the market got a vote.
+# QB and TE are anchored for a different reason than K and DEF: not because they
+# are streamable, but because the board's cross-position pricing of them is
+# measurably worse than the market's. Realized value above replacement, by board
+# rank bucket over 2022-2025:
+#
+#             QB     RB     WR     TE
+#    1-24    +19    +62    +55    +57
+#   25-48    -12    +45     +2     -5
+#   49-72    -71     +9    -24     -5
+#
+# The same table by ADP rank is roughly level (1-24: QB +64, RB +59, WR +53,
+# TE +93). The board puts ~4.75 QB per season in its top 24 and they return a
+# third of what everything else there returns; the market puts one in and it
+# returns +64. Note this survives ECR-only, so it is not the blend.
+#
+# These two weights are a reasoned starting point, NOT a fitted result -- four
+# folds is nowhere near enough to tune them on. They move QB and TE most of the
+# way toward market placement while leaving our ordering inside each position.
 market_anchor:
   positions:
     DEF: 1.0
     K: 0.7
+    # QB: 0.6 and TE: 0.5 were TRIED AND REVERTED. The realized-VOR analysis
+    # above is real, but the conclusion drawn from it was wrong: anchoring these
+    # two cost 0.84 places in the standings (4.90 -> 5.74) and every other
+    # metric with it. Pushing QB toward market placement made the drafter defer
+    # the position until it was picked over, and with a cap of one QB there is
+    # no second chance. QB has low leverage in a 1-QB league *everywhere* on the
+    # board -- the VOR table shows it negative at ranks 25-72 as well as weak at
+    # 1-24 -- so the answer is not "later", it is "at market, once".
   # The pick-value curve is fit only on positions whose VORP we trust. Including
   # an anchored position in its own reference curve would be circular.
   reference_positions: [QB, RB, WR, TE]
+
+# How many of each position is worth owning. These are the manager's actual
+# strategy, not a model output: one quarterback, one tight end (a second only
+# when he beats the other flex options, which the drop-off policy works out on
+# its own -- the cap just permits it), one kicker, one defense.
+#
+# The cap is a ceiling, not a target. RB and WR are deliberately absent: bench
+# depth at those positions is real, because of the flex and because of injury
+# attrition.
+draft_policy:
+  position_caps:
+    QB: 1
+    TE: 2
+    K: 1
+    DEF: 1
 
 # Consensus blend. Each component is z-scored within position, averaged, then
 # mapped back to points.

@@ -75,6 +75,16 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   `src/backtest/walkforward.py`.
 - **2024 K/DEF is downweighted.** The 2024 kickoff rule was a one-year anomaly;
   its special-teams scoring distribution does not transfer to 2026.
+- **An unfilled starting slot is scored at the streaming level, not zero.** The
+  simulator has no waiver wire, so a one-QB roster fielded nobody at QB 3.1
+  weeks a season and was charged the whole loss — a manager streams a
+  replacement for free. That artifact made thin rosters look ~0.7 places worse
+  than they are and would have biased every roster-shape question the same way.
+  `metrics.waiver_levels` uses the median of the tier just below what the league
+  rosters as starters; the best available would assume foresight nobody has.
+  Turn it off with `BacktestConfig.model_waivers=False` only to reproduce an old
+  run — **rows scored under different scorers are not comparable.**
+
 - **The primary metric is playoff-week (15–17) points, not season total and not
   projection MAE.** A model that projects accurately but drafts players who miss
   weeks 15–17 has not helped. Metric priority is encoded in
@@ -116,6 +126,12 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   ffverse (`nflreadpy.load_ff_rankings`), which `src/features/rank_curve.py`
   converts to points through a historical positional rank→points curve.
 
+- **Roster shape is the manager's call, not the model's.** He drafts one QB and
+  one TE — a second TE only when the remaining tight ends beat the other flex
+  options. That is `draft_policy.position_caps` in the config. The TE rule needs
+  no special case: the drop-off policy already values a TE2 by whether he
+  improves the flex, so the cap only has to permit it.
+
 - **K and DEF are priced at the market, not at their VORP.** Value-based
   drafting says the best defense out-scores the waiver defense by ~12 points a
   season — true — and concludes you should spend a sixth-round pick on him,
@@ -125,6 +141,14 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   blends an anchored position's VORP rank toward its ADP rank
   (`config: market_anchor`). DEF is anchored hard (sits at ADP); K is anchored
   loosely, so a genuinely exceptional leg can still surface.
+
+  **QB (0.6) and TE (0.5) are anchored too, for a different reason:** not
+  streamability, but that the board's cross-position pricing of them is
+  measurably worse than the market's. Realized value above replacement by board
+  rank bucket over 2022–2025 had QB at +19 / −12 / −71 across the first three
+  buckets while RB ran +62 / +45 / +9; by ADP rank the same table is level. See
+  HANDOFF.md "SETTLED — the market was right about QB and TE". This survives
+  ECR-only, so it is not the blend.
 
   **Anchor in rank space, never in value space.** Replacing an anchored player's
   VORP with the value the market implies for his slot does not work: that value

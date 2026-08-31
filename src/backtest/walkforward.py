@@ -63,6 +63,12 @@ class BacktestConfig:
     need_penalty: float = 0.4
     value_col: str = "vorp"
     min_train_seasons: int = 2
+    # How many of each position is worth owning. None keeps ValueDrafter's
+    # defaults; config/league.yaml `draft_policy.position_caps` overrides.
+    caps: dict[str, int] | None = None
+    # Credit an unfilled starting slot with what a streamer scored that week.
+    # Off, the scorer punishes thin rosters for the absence of a waiver wire.
+    model_waivers: bool = True
 
     def hash(self) -> str:
         payload = json.dumps(
@@ -129,6 +135,14 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
     if season_actuals.empty:
         raise ValueError(f"no realized weekly points for season {fold.target_season}")
 
+    # What a streamer was worth each week, so an unfilled starting slot is
+    # charged the cost of streaming rather than the cost of fielding nobody.
+    waiver_by_week = {
+        wk: M.waiver_levels(season_actuals[season_actuals["week"] == wk],
+                            cfg.starters, cfg.teams)
+        for wk in M.REGULAR_WEEKS + M.PLAYOFF_WEEKS
+    } if cfg.model_waivers else {}
+
     rng = np.random.default_rng(cfg.seed + fold.target_season)
     results: list[M.BacktestResult] = []
 
@@ -143,7 +157,7 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
             starters=cfg.starters, flex_slots=cfg.flex_slots,
             flex_eligible=cfg.flex_eligible, sigma=cfg.sigma,
             need_boost=cfg.need_boost, need_penalty=cfg.need_penalty,
-            value_col=cfg.value_col, seed=seed,
+            value_col=cfg.value_col, seed=seed, caps=cfg.caps,
         )
 
         my_team = my_slot - 1
@@ -156,6 +170,7 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
                 wk: M.optimal_lineup_points(
                     sub[sub["week"] == wk], cfg.starters,
                     cfg.flex_slots, cfg.flex_eligible,
+                    waiver=waiver_by_week.get(wk),
                 )
                 for wk in M.REGULAR_WEEKS + M.PLAYOFF_WEEKS
             }

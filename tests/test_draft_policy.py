@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -158,6 +159,60 @@ def test_the_starter_backstop_still_wins_at_the_end_of_the_draft():
     assert pick["position"] == "K"
 
 
+# --------------------------------------------------------------------------
+# Position caps — the manager's actual strategy: one QB, one TE (a second only
+# when he beats the other flex options), one K, one DEF.
+# --------------------------------------------------------------------------
+
+CAPS = {"QB": 1, "TE": 2, "K": 1, "DEF": 1}
+
+
+def test_a_second_quarterback_is_never_drafted():
+    roster = _roster([("WR", 92.0), ("QB", 85.0)])
+    pool = _pool([("Backup QB", "QB", 60.0, 40),
+                  ("Bench WR", "WR", 5.0, 70)] + _filler(12))
+    drafter = ValueDrafter(caps=CAPS)
+    pick = pool.loc[drafter.choose(pool, roster, 16, 14, picks_until_next=8)]
+    assert pick["position"] != "QB", pick["player_name"]
+
+
+def test_a_second_tight_end_is_taken_when_he_beats_the_flex_alternatives():
+    """The manager's stated rule, and the drop-off policy already computes it:
+    a TE2 is worth having exactly when he outscores what else would fill the
+    flex. The cap only has to permit it."""
+    # WR slots full; the flex currently holds a weak third receiver.
+    roster = _roster([("WR", 90.0), ("WR", 40.0), ("WR", 5.0),
+                      ("RB", 50.0), ("RB", 30.0), ("TE", 60.0), ("QB", 70.0)])
+    pool = _pool([("Good TE2", "TE", 45.0, 60),     # clears the flex incumbent
+                  ("Weak WR", "WR", 2.0, 62)] + _filler(12))
+    drafter = ValueDrafter(caps=CAPS)
+    pick = pool.loc[drafter.choose(pool, roster, 16, 9, picks_until_next=8)]
+    assert pick["player_name"] == "Good TE2"
+
+
+def test_a_second_tight_end_is_skipped_when_the_flex_is_already_better():
+    roster = _roster([("WR", 90.0), ("WR", 40.0), ("WR", 35.0),
+                      ("RB", 50.0), ("RB", 30.0), ("TE", 60.0), ("QB", 70.0)])
+    pool = _pool([("Weak TE2", "TE", -20.0, 60),    # loses to the flex incumbent
+                  ("Better WR", "WR", 8.0, 62)] + _filler(12))
+    drafter = ValueDrafter(caps=CAPS)
+    pick = pool.loc[drafter.choose(pool, roster, 16, 9, picks_until_next=8)]
+    assert pick["player_name"] == "Better WR"
+
+
+def test_caps_never_block_the_last_body_at_a_needed_position():
+    """A cap is a ceiling on *useful* copies, not a way to end up unable to
+    field a legal lineup."""
+    roster = _roster([("WR", 90.0), ("WR", 40.0), ("RB", 50.0), ("RB", 30.0),
+                      ("TE", 30.0), ("QB", 60.0), ("WR", 20.0), ("K", -40.0)])
+    pool = _pool([("Only DEF", "DEF", -46.0, 185),
+                  ("Bench WR", "WR", 5.0, 83)] + _filler(12))
+    drafter = ValueDrafter(caps=CAPS)
+    # One pick left, one empty starting slot.
+    pick = pool.loc[drafter.choose(pool, roster, 16, 1, picks_until_next=8)]
+    assert pick["position"] == "DEF"
+
+
 def test_starting_value_ignores_players_who_cannot_crack_the_lineup():
     drafter = ValueDrafter()
     roster = _roster([("QB", 85.0)])
@@ -207,3 +262,59 @@ def test_fitted_slopes_never_returns_an_empty_mapping():
                         pd.DataFrame(columns=["season"]), None, [])
     assert got["RB"] == 0.79
     assert set(got) >= {"QB", "RB", "WR", "TE", "K", "DEF"}
+
+
+# --------------------------------------------------------------------------
+# Waiver-aware scoring
+# --------------------------------------------------------------------------
+
+from src.backtest.metrics import (  # noqa: E402
+    optimal_lineup_points,
+    waiver_levels,
+)
+
+LINEUP = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DEF": 1}
+
+
+def _week(rows: list[tuple[str, float]]) -> pd.DataFrame:
+    return pd.DataFrame([{"position": p, "points": v} for p, v in rows])
+
+
+def test_an_unfilled_slot_is_charged_streaming_not_zero():
+    """The artifact this removes: a one-QB roster fields nobody at QB 3.1 weeks
+    a season and was charged the whole loss, when a real manager streams a
+    replacement off waivers for free."""
+    week = _week([("RB", 20.0), ("RB", 15.0), ("WR", 18.0), ("WR", 12.0),
+                  ("TE", 10.0), ("K", 8.0), ("DEF", 6.0)])  # no QB rostered
+    without = optimal_lineup_points(week, LINEUP, 1, FLEX)
+    with_wire = optimal_lineup_points(week, LINEUP, 1, FLEX,
+                                      waiver={"QB": 14.0})
+    assert with_wire == pytest.approx(without + 14.0)
+
+
+def test_a_filled_slot_is_never_topped_up_from_waivers():
+    week = _week([("QB", 25.0), ("RB", 20.0), ("RB", 15.0), ("WR", 18.0),
+                  ("WR", 12.0), ("TE", 10.0), ("K", 8.0), ("DEF", 6.0)])
+    plain = optimal_lineup_points(week, LINEUP, 1, FLEX)
+    with_wire = optimal_lineup_points(week, LINEUP, 1, FLEX,
+                                      waiver={"QB": 14.0})
+    assert with_wire == pytest.approx(plain)
+
+
+def test_an_empty_roster_still_scores_the_streamable_baseline():
+    got = optimal_lineup_points(_week([]), {"QB": 1}, 0, FLEX,
+                                waiver={"QB": 14.0})
+    assert got == pytest.approx(14.0)
+
+
+def test_waiver_level_is_the_tier_below_what_the_league_rosters():
+    # 30 quarterbacks scoring 30 down to 1. Two teams starting one QB each
+    # roster the top 2, so the wire starts at the 3rd and runs two deep.
+    week = _week([("QB", float(30 - i)) for i in range(30)])
+    levels = waiver_levels(week, {"QB": 1}, teams=2)
+    assert levels["QB"] == pytest.approx(np.median([28.0, 27.0]))
+
+
+def test_waiver_level_is_zero_when_the_pool_is_exhausted():
+    week = _week([("QB", 20.0)])
+    assert waiver_levels(week, {"QB": 1}, teams=10)["QB"] == 0.0

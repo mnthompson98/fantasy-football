@@ -47,40 +47,85 @@ class BacktestResult:
 
 
 def optimal_lineup_points(week_points: pd.DataFrame, starters: dict[str, int],
-                          flex_slots: int, flex_eligible: tuple[str, ...]) -> float:
+                          flex_slots: int, flex_eligible: tuple[str, ...],
+                          waiver: dict[str, float] | None = None) -> float:
     """Best legal starting lineup for one team in one week.
 
     `week_points` needs `position` and `points`. Players who did not play score
     0 rather than being dropped — that is the real cost of starting an inactive
     player, and hiding it would flatter every roster equally.
 
+    `waiver` credits an *unfilled* starting slot with what a freely-available
+    player at that position scored that week, instead of zero. Without it the
+    scorer silently punishes thin rosters for a feature the simulator does not
+    have: a manager who rosters one quarterback fields nobody there 3.1 weeks a
+    season (bye plus injuries) and is charged the full loss, when in reality he
+    streams a replacement off waivers for nothing. That artifact was worth ~75
+    QB points a season and made a one-QB strategy look 0.7 places worse in the
+    standings than it is.
+
     This is the *hindsight-optimal* lineup, which slightly overstates what a
     manager would actually have started. It is applied identically to every
     team in the sim, so the comparison stays fair; treat the absolute number as
     an upper bound and the relative ranking as the signal.
     """
-    if week_points.empty:
-        return 0.0
-
-    df = week_points.copy()
-    df["points"] = pd.to_numeric(df["points"], errors="coerce").fillna(0.0)
-    df = df.sort_values("points", ascending=False)
+    df = week_points.copy() if not week_points.empty else week_points
+    if not df.empty:
+        df["points"] = pd.to_numeric(df["points"], errors="coerce").fillna(0.0)
+        df = df.sort_values("points", ascending=False)
 
     used: set = set()
     total = 0.0
 
     for pos, n in starters.items():
-        pool = df[(df["position"] == pos) & (~df.index.isin(used))].head(n)
-        total += float(pool["points"].sum())
-        used |= set(pool.index)
+        pool = (df[(df["position"] == pos) & (~df.index.isin(used))].head(n)
+                if not df.empty else df)
+        filled = len(pool)
+        if filled:
+            total += float(pool["points"].sum())
+            used |= set(pool.index)
+        if waiver:
+            total += (n - filled) * float(waiver.get(pos, 0.0))
 
     if flex_slots:
-        pool = df[
-            df["position"].isin(flex_eligible) & (~df.index.isin(used))
-        ].head(flex_slots)
-        total += float(pool["points"].sum())
+        pool = (df[df["position"].isin(flex_eligible) & (~df.index.isin(used))]
+                .head(flex_slots) if not df.empty else df)
+        filled = len(pool)
+        if filled:
+            total += float(pool["points"].sum())
+        if waiver:
+            best_flex = max((waiver.get(p, 0.0) for p in flex_eligible),
+                            default=0.0)
+            total += (flex_slots - filled) * float(best_flex)
 
     return total
+
+
+def waiver_levels(week_points: pd.DataFrame, starters: dict[str, int],
+                  teams: int, *, position_col: str = "position",
+                  points_col: str = "points") -> dict[str, float]:
+    """What a freely-available player at each position scored, this week.
+
+    Defined as the median of the tier just below what the league rosters as
+    starters: for a 10-team league starting one QB, that is the QBs ranked 11th
+    through 20th that week. Taking the single best available would assume the
+    manager knew in advance which streamer would hit, which is precisely the
+    thing nobody can do.
+    """
+    if week_points.empty:
+        return {}
+
+    df = week_points.copy()
+    df[points_col] = pd.to_numeric(df[points_col], errors="coerce").fillna(0.0)
+
+    out: dict[str, float] = {}
+    for pos, n in starters.items():
+        ranked = (df[df[position_col] == pos]
+                  .sort_values(points_col, ascending=False)[points_col])
+        rostered = teams * max(1, n)
+        tier = ranked.iloc[rostered:rostered + teams]
+        out[pos] = float(tier.median()) if len(tier) else 0.0
+    return out
 
 
 def score_roster(roster_player_ids: list, weekly_actuals: pd.DataFrame,
