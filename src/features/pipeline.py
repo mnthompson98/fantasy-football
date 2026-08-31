@@ -113,12 +113,17 @@ def expected_points_rates(opportunity: pd.DataFrame) -> pd.DataFrame:
 def value_board(pool: pd.DataFrame, totals: pd.DataFrame, cfg: dict, *,
                 train_seasons: list[int],
                 shape: LeagueShape | None = None,
+                slopes: dict[str, float] | None = None,
                 verbose: bool = False) -> pd.DataFrame:
     """Blend, calibrate, shrink, value and anchor. The heart of the system.
 
     `pool` carries one row per draftable player with the component columns
     already attached. `totals` is history restricted to `train_seasons` — it is
     used to measure positional persistence, and nothing else.
+
+    `slopes` overrides the configured calibration priors. Pass measured ones
+    whenever they are available: the config's defaults come from a generic
+    study, and on this league's scoring they had RB and WR the wrong way round.
     """
     train = totals[totals["season"].isin(train_seasons)]
 
@@ -126,7 +131,7 @@ def value_board(pool: pd.DataFrame, totals: pd.DataFrame, cfg: dict, *,
     blended = blend_projections(pool, weights=weights)
 
     valued = apply_calibration(
-        blended, slopes=cfg["calibration"]["slopes"],
+        blended, slopes=slopes or cfg["calibration"]["slopes"],
         out_col="projection_calibrated",
     )
 

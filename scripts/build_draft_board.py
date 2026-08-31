@@ -35,6 +35,7 @@ from src.backtest.leakage_guard import (  # noqa: E402
 from src.draft.board import export, finalize_board  # noqa: E402
 from src.features.pipeline import ecr_to_pool, value_board  # noqa: E402
 from src.features.scoring import Scoring  # noqa: E402
+from src.features.slopes import fitted_slopes  # noqa: E402
 from src.features.vorp import LeagueShape  # noqa: E402
 from src.ingest import history as H  # noqa: E402
 from src.ingest import nflverse as nv  # noqa: E402
@@ -134,10 +135,17 @@ def assemble(cfg: dict, *, refresh: bool = False, league_id: str | None = None,
         print(f"  component {comp:<14} {n:4d}/{len(pool)} players")
 
     print("blending, calibrating, computing VORP...")
+    # Slopes are fit against *past* preseason ECR snapshots paired with what
+    # actually happened, so this needs the dated archive, not the current scrape
+    # that `rankings` holds. Handing it the current-only frame would find no
+    # history, silently fall back to the priors, and print nothing about it.
+    archive = nv.load_ff_rankings_history(refresh=refresh)
+    slopes = fitted_slopes(cfg, archive, totals, cw, hist_seasons, verbose=True)
+
     shape = LeagueShape.from_config(cfg)
     excluded = pool[~pool["available"]].copy()
     valued = value_board(
-        pool[pool["available"]], totals, cfg,
+        pool[pool["available"]], totals, cfg, slopes=slopes,
         train_seasons=hist_seasons, shape=shape, verbose=True,
     )
 

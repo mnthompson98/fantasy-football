@@ -40,6 +40,7 @@ from src.backtest.leakage_guard import (  # noqa: E402
 from src.backtest.walkforward import BacktestConfig, build_folds, run_backtest  # noqa: E402
 from src.features.pipeline import ecr_to_pool, value_board  # noqa: E402
 from src.features.scoring import Scoring  # noqa: E402
+from src.features.slopes import fitted_slopes  # noqa: E402
 from src.features.vorp import LeagueShape  # noqa: E402
 from src.ingest import history as H  # noqa: E402
 from src.ingest import nflverse as nv  # noqa: E402
@@ -102,7 +103,14 @@ def make_board_builder(cfg: dict, *, totals: pd.DataFrame,
             prior_season=prior_season, train_seasons=train,
             downweight=cfg["backtest"].get("downweight"),
         )
-        board = value_board(pool, train_totals, cfg,
+
+        # Slopes are fit on seasons strictly before this fold's target, which is
+        # what keeps them leakage-free. Early folds have only one season of
+        # preseason ECR to fit on and fall back to the config priors per
+        # position, which is the honest behaviour.
+        slopes = fitted_slopes(cfg, rankings, train_totals, crosswalk, train)
+
+        board = value_board(pool, train_totals, cfg, slopes=slopes,
                             train_seasons=train, shape=shape)
 
         # The simulator and the scorer both key on `player_id`. Inside a

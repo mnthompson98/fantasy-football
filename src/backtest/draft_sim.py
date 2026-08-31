@@ -95,6 +95,24 @@ def snake_order(teams: int, rounds: int) -> list[int]:
     return order
 
 
+def picks_until_next_turn(pick_no: int, teams: int, my_slot: int) -> int:
+    """Picks between `pick_no` and this manager's next turn in a snake draft.
+
+    This is the number that decides whether to reach: if the tier you want has
+    fewer players left than this, it will be gone. Mirrors the identical
+    function in `src/draft/monitor.py`, which the live board uses.
+    """
+    nxt = pick_no + 1
+    while nxt <= teams * 100:
+        rnd = (nxt - 1) // teams
+        idx = (nxt - 1) % teams
+        slot = idx + 1 if rnd % 2 == 0 else teams - idx
+        if slot == my_slot:
+            return nxt - pick_no - 1
+        nxt += 1
+    return 0
+
+
 class OpponentModel:
     """Samples opponent picks around ADP with positional-need adjustment."""
 
@@ -129,13 +147,44 @@ class OpponentModel:
 
 
 class ValueDrafter:
-    """Our side: take the highest-VORP available, subject to roster legality.
+    """Our side: take the pick that most improves our *starting lineup*.
 
-    Deliberately simple. The board is where the intelligence lives; if a
-    sophisticated pick policy is needed to beat ADP opponents, the board is
-    not good enough yet.
+    The board is still where the intelligence lives — this policy adds no
+    opinion about players, only about slots. But "take the highest VORP
+    available" is not a neutral baseline, it is a broken one, and the backtest
+    caught it. Drafting from slot 5 in 2025 it produced:
 
-    Two constraints keep naive VBD from producing an illegal roster:
+        r2  QB Josh Allen        r3  QB Lamar Jackson
+        r5  TE Travis Kelce      r6  TE David Njoku
+        r7-r12  six more WRs (eight in total)
+        r13 RB Joe Mixon         r14 RB Rhamondre Stevenson
+
+    Two premium picks on a backup quarterback who can never start in a 1-QB
+    league, two more on a backup tight end, eight receivers of whom three can
+    play — and no running back until the end-of-draft backstop forced two. Best
+    RB scored 178.8 against a league median best of 279.5. It finished 9th of 10.
+
+    The cause is that VORP measures a player against *positional replacement*,
+    which is a property of the league, not against *your roster*, which is what
+    a pick actually changes. Once Josh Allen is yours, the second-best QB in
+    football adds nothing: he cannot enter your lineup.
+
+    So the policy scores a candidate by the **drop-off**: how much more does the
+    best player at his position improve my starting lineup now than the best one
+    still there at my next turn would? That single quantity handles both
+    failures at once. A backup QB improves nothing, now or later, so his
+    drop-off is zero. A position being run on has a steep drop-off, so it gets
+    taken. A position nobody else wants can wait.
+
+    Scoring by lineup improvement *alone* is not enough, and the second backtest
+    proved it: an empty slot is worth replacement level (0 in VORP terms), so
+    once every remaining running back is below replacement, filling RB1 scores
+    as a downgrade and the policy takes a ninth receiver instead. Comparing
+    against what survives to the next pick is what removes that pathology —
+    below-replacement is still far better than the nothing you would otherwise
+    be starting.
+
+    Three constraints keep the policy from producing an illegal roster:
 
     1. **Position caps.** Raw VORP is happy to take a fifth tight end. Bench
        depth has real value at RB/WR, near-none at QB/TE/K/DEF in a 1-slot
@@ -161,8 +210,84 @@ class ValueDrafter:
         self.caps = caps if caps is not None else dict(self.DEFAULT_CAPS)
         self.scarcity_floor = scarcity_floor
 
+    def _effective(self, row) -> float:
+        """A player's value on a points scale.
+
+        `replacement_points` puts VORP back on the scale where an empty slot is
+        genuinely worth zero. A board without the column (a hand-built test
+        fixture) degrades to plain VORP, which is fine as long as every position
+        is treated the same way.
+        """
+        value = float(row[self.value_col])
+        repl = row.get("replacement_points", 0.0)
+        try:
+            repl = float(repl)
+        except (TypeError, ValueError):
+            repl = 0.0
+        return value + (repl if repl == repl else 0.0)  # NaN-safe
+
+    # ----------------------------------------------------------------
+    # Starting-lineup value
+    # ----------------------------------------------------------------
+
+    def starting_value(self, roster: Roster,
+                       extra: tuple[str, float] | None = None) -> float:
+        """Total value of the best legal starting lineup, optionally with one
+        more player added.
+
+        Values here are on a **points** scale, not a VORP scale, and the
+        difference is the whole reason this works. An unfilled starting slot
+        scores zero actual points on Sunday. In VORP space zero is *replacement
+        level*, so an empty slot and a replacement-level starter look identical
+        — and the drafter concluded that taking a replacement-level running back
+        for an empty RB slot gained it nothing. It then spent the pick on a
+        backup quarterback with a higher VORP who could never enter the lineup.
+
+        `EFFECTIVE_COL` (vorp + replacement_points) restores the points scale
+        while preserving whatever the market anchor did to K and DEF, since the
+        anchor was applied to VORP.
+        """
+        by_pos: dict[str, list[float]] = {}
+        for p in roster.picks:
+            by_pos.setdefault(p["position"], []).append(self._effective(p))
+        if extra is not None:
+            by_pos.setdefault(extra[0], []).append(float(extra[1]))
+        for vals in by_pos.values():
+            vals.sort(reverse=True)
+
+        total = 0.0
+        leftovers: list[float] = []
+        for pos, vals in by_pos.items():
+            n = roster.starters.get(pos, 0)
+            total += sum(vals[:n])
+            if pos in roster.flex_eligible:
+                leftovers.extend(vals[n:])
+
+        leftovers.sort(reverse=True)
+        total += sum(leftovers[:roster.flex_slots])
+        return total
+
+    def marginal_value(self, roster: Roster, position: str, value: float
+                       ) -> float:
+        """How much this player would improve our starting lineup."""
+        return (self.starting_value(roster, extra=(position, value))
+                - self.starting_value(roster))
+
+    def survivors(self, available: pd.DataFrame, picks_until_next: int
+                  ) -> pd.DataFrame:
+        """Who is plausibly still on the board at our next turn.
+
+        Opponents draft near ADP, so the next `picks_until_next` players off the
+        board are approximately the top of the remaining ADP list. This is the
+        same assumption the opponent model makes, minus the noise.
+        """
+        if picks_until_next <= 0:
+            return available
+        return available.sort_values("adp_rank").iloc[picks_until_next:]
+
     def choose(self, available: pd.DataFrame, roster: Roster,
-               roster_size: int, picks_remaining: int) -> int:
+               roster_size: int, picks_remaining: int,
+               picks_until_next: int = 0) -> int:
         df = available
         counts = roster.counts()
 
@@ -217,7 +342,54 @@ class ValueDrafter:
                     df = forced
                     break
 
-        return int(df[self.value_col].idxmax())
+        # 4. Take the pick with the most to lose by waiting.
+        #
+        #    Not "who improves my lineup most" — that alone still builds an
+        #    absurd roster, because it says an empty slot is worth replacement
+        #    level (0 in VORP terms) and therefore that filling it with a
+        #    below-replacement player is a downgrade. Late in a run on a
+        #    position, every remaining player is below replacement, so the
+        #    policy keeps taking a ninth receiver over its first running back.
+        #
+        #    What matters is the *drop-off*: how much better is the best player
+        #    at this position now than the best one who will still be here at my
+        #    next turn? That is what a pick actually buys. A position nobody
+        #    else wants can wait; a position being run on cannot.
+        #
+        #    Only the best available player at each position can be the answer —
+        #    marginal value is monotone in value within a position — so this
+        #    costs a couple of lineup evaluations per position, not one per
+        #    player.
+        left = self.survivors(df, picks_until_next)
+
+        best_idx = None
+        best_key = None
+        for pos, group in df.groupby("position", sort=False):
+            pos = str(pos)
+            idx = int(group[self.value_col].idxmax())
+            now = self._effective(df.loc[idx])
+
+            later_pool = left[left["position"] == pos]
+            m_now = self.marginal_value(roster, pos, now)
+            gain = m_now
+            if not later_pool.empty:
+                later_idx = int(later_pool[self.value_col].idxmax())
+                gain -= self.marginal_value(
+                    roster, pos, self._effective(later_pool.loc[later_idx]))
+
+            # Ties break on *anchored* VORP, not on lineup contribution. Using
+            # the lineup contribution here rewards filling any empty slot, and
+            # once the skill positions are set that means drafting a kicker and
+            # a defense in rounds 8 and 9 — undoing the market anchor, which
+            # exists precisely to keep them out of the early rounds. Anchored
+            # VORP already prices them below every bench body, so the tie
+            # resolves the way it should and the end-of-draft backstop picks
+            # them up.
+            key = (gain, float(df.at[idx, self.value_col]))
+            if best_key is None or key > best_key:
+                best_key, best_idx = key, idx
+
+        return best_idx if best_idx is not None else int(df[self.value_col].idxmax())
 
 
 def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
@@ -265,7 +437,8 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
 
         picks_remaining = roster_size - len(roster.picks)
         if team == my_team:
-            idx = me.choose(available, roster, roster_size, picks_remaining)
+            idx = me.choose(available, roster, roster_size, picks_remaining,
+                            picks_until_next_turn(pick_no, teams, my_slot))
         else:
             idx = opponent.choose(available, roster)
 
@@ -278,6 +451,8 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
             "position": row["position"],
             "adp_rank": float(row["adp_rank"]),
             value_col: float(row[value_col]),
+            # Carried so the lineup calculation can work on a points scale.
+            "replacement_points": float(row.get("replacement_points", 0.0) or 0.0),
         })
         available = available.drop(index=idx)
 

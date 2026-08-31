@@ -85,7 +85,17 @@ backtest:
     positional_need_penalty: 0.4 # multiplier when the position is already full
 
 # Post-hoc calibration slopes. Projection spread is systematically too wide;
-# shrink toward the positional mean. Source: Fantasy Football Analytics, 2026.
+# shrink toward the positional mean.
+#
+# These are FALLBACK priors, used only when there is not enough history to
+# measure. `fit_from_history` below is the real path — and it matters, because
+# these priors turned out to have RB and WR the wrong way round for this league.
+#
+# Source: Fantasy Football Analytics, 2026. Measured on 2021-2025 preseason ECR
+# against realized points under this league's scoring, RB fits 0.85 and WR 0.77
+# — an exact swap of the two priors. Shrinking RB harder than WR flattens the
+# RB top end while preserving the WR top end, which is how the simulated drafter
+# ended up with eight receivers and two running backs.
 calibration:
   slopes:
     QB: 0.67
@@ -94,6 +104,20 @@ calibration:
     TE: 0.72
     K: 0.60
     DEF: 0.60
+
+  # Fit the slopes from this league's own history instead of the priors above.
+  # Each fold fits on seasons strictly before its target, so this stays
+  # leakage-free; preseason ECR starts in 2021, which bounds what is available.
+  fit_from_history:
+    enabled: true
+    # Only the players you would actually draft. Across the whole pool the
+    # slopes diverge by position, but that is the deep tail talking — pools
+    # differ in depth and the measurement becomes "starters outscore backups".
+    # Inside the top 40 all four skill positions fit ~0.70 and the differences
+    # between them are noise.
+    top_n: 40
+    # Below this many (projection, actual) pairs for a position, keep the prior.
+    min_obs: 40
 
   # A second, measured shrink for positions whose rank ordering does not persist
   # year to year. The rank curve is fit on finish rank, which assumes the

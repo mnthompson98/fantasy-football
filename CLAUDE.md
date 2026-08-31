@@ -85,6 +85,30 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
 - **Calibration correction is applied after projection, not learned inside it.**
   Projection spread is systematically too wide; shrink toward the positional mean.
 
+- **Calibration slopes are measured, not assumed.** The config's priors came
+  from a published study and had RB and WR backwards for this league: fit on
+  2021-2025 preseason ECR against realized points, RB is 0.85 and WR 0.77, an
+  exact swap of the prior 0.79 and 0.85. Since a lower slope flattens a
+  position's top end, shrinking RB harder than WR pushed receivers above backs
+  everywhere and the simulated drafter built 8 WR / 2 RB rosters.
+  `src/features/slopes.py` fits per fold on seasons strictly earlier than the
+  target; the config values are now only a fallback.
+
+- **The drafter values a pick by drop-off, not by VORP.** "Take the highest VORP
+  available" drafted a backup QB in round 3 of a 1-QB league. Two distinct
+  errors, both found by the backtest and both pinned by comments in
+  `src/backtest/draft_sim.py`: VORP measures a player against positional
+  replacement rather than against *your roster*, and lineup value on a VORP
+  scale makes an empty starting slot look identical to a replacement-level
+  starter (both zero). Lineup value is on a **points** scale for that reason.
+
+- **The blend weights were tried and are not the problem.** Rebuilding the
+  2022-2025 boards under ECR-only, ECR 2/0.5/0.5, ECR 4/0.5/0.5 and equal
+  weights moves the top-60 position mix by two or three slots. Even ECR-only —
+  the market's own ranking as the sole input — puts ~38 QB and ~30 TE in the top
+  60 against the market's 23 and 16. Do not go looking there again; the
+  remaining cross-position error is downstream of the blend.
+
 - **FantasyPros point projections are not obtainable; ECR is.** As of 2026-08-30
   fantasypros.com server-renders only the top 10 rows of each projections table,
   so the planned "FantasyPros PPR consensus projection" component does not exist.

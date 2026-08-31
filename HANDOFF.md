@@ -139,6 +139,35 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
 
 ---
 
+## Backtest baseline
+
+160 simulated drafts (40 per season, 2022-2025), varied slots and seeds,
+`--label fitted-slopes+dropoff`:
+
+| metric | first run | after the fixes below |
+|---|---|---|
+| league rank by points (of 10, lower better) | 6.60 | **4.90** |
+| win rate | 0.456 | **0.532** |
+| playoff points (weeks 15-17) | 355.8 | **389.9** |
+| season points | 2093 | **2200** |
+
+5.50 is what a coin flip gets. The first run was meaningfully *worse* than an
+ADP-following field; it is now meaningfully better. Two fixes did it:
+
+1. **Calibration slopes fit from history** rather than the config's generic
+   priors, which had RB and WR inverted (see CLAUDE.md).
+2. **The drafter values picks by drop-off**, on a points scale, rather than by
+   raw VORP.
+
+Per season: 2022 4.35, 2023 2.75, 2024 4.58, **2025 7.92**. 2025 is the one
+season it still loses badly, and nobody has looked at why. That is the most
+promising thread left.
+
+Caveat worth keeping in mind: the two fixes went in together and were measured
+together. Neither has been scored on its own.
+
+---
+
 ## Open questions the backtest should settle
 
 These are places where the board makes a defensible choice that has not been
@@ -174,17 +203,48 @@ capping the anchor just below 1.0.
 preference, not a fitted result. `run_backtest.py --label` exists so you can
 score a board with and without them and compare.
 
-### 2. Blend weights are a prior, not a result
+### 2. TRIED AND REJECTED — the blend weights are not the problem
 
-`config/league.yaml` sets ECR 2.0, xfp 0.5, prior 0.5. The reasoning is written
-out in the config, and it is structural rather than fitted: ECR already contains
-both production components plus the offseason information they cannot have, and
-the two production components are last season measured twice rather than two
-independent sources.
+Rebuilding the 2022-2025 boards under four weightings, and comparing each one's
+top-60 position mix against the market's:
 
-That reasoning is sound but unverified. **This is the board's main tuning knob.**
-Raising the production weights makes the board disagree with the draft room more
-often, which is where both the points and the blowups live.
+| weights | QB | RB | WR | TE |
+|---|---|---|---|---|
+| ECR-only | 38 | 64 | 108 | 30 |
+| ECR 2 / .5 / .5 (current) | 38 | 67 | 103 | 32 |
+| ECR 4 / .5 / .5 | 35 | 70 | 105 | 30 |
+| equal 1/1/1 | 35 | 68 | 106 | 31 |
+| **ADP (market)** | **23** | **82** | **119** | **16** |
+
+(totals over four seasons; divide by four for per-season)
+
+The weights move the mix by two or three slots out of sixty. Even ECR-only —
+the market's own ranking as the *sole* input — lands 38 QB and 30 TE in the top
+60 against the market's 23 and 16. Whatever is wrong is downstream of the blend.
+
+A calibration hypothesis was also tried and rejected: calibration shrinks each
+position toward its *pool* mean, and the pools differ hugely in depth (147 RB vs
+62 QB), so the RB top end should get dragged toward a hundred undraftable backs.
+Shrinking toward replacement level instead changed almost nothing, because the
+fitted slopes are near-uniform (0.68-0.72) and uniform scaling is
+rank-preserving. It was reverted rather than kept as an unjustified change.
+
+### 2b. The live question: QB and TE are overdrafted
+
+The board takes ~9.5 QB and ~7.5 TE per season in its top 60; the market takes
+~5.75 and ~4. That ~7-slot overdraft is what squeezes out the backs.
+
+Note the board's RB:WR *ratio* (0.65) is close to the market's (0.68) — so the
+8 WR / 2 RB rosters were the drafter compounding a smaller board error, not the
+board being receiver-mad.
+
+**Nobody has established whether the board or the market is right about QB/TE.**
+The test to run: realized value-above-replacement for the board's top-60
+selection versus ADP's top-60 selection, per position. If the board's QBs
+genuinely deliver more points above QB replacement than the market's extra
+RB/WR do above theirs, the board is right and the market is wrong. Since the
+error survives ECR-only, it lives in the rank curve or the replacement levels —
+`fit_rank_curve` and `replacement_ranks` are where to look.
 
 ### 3. The rank curve conflates projected rank with finish rank
 

@@ -71,6 +71,57 @@ def opportunity_for(season: int, cw=None, *, refresh: bool = False
     return opp
 
 
+def projection_actual_pairs(rankings: pd.DataFrame, totals: pd.DataFrame,
+                            cw, seasons: list[int], *,
+                            downweight: list[dict] | None = None,
+                            top_n: int = 40) -> pd.DataFrame:
+    """Preseason projections paired with what actually happened.
+
+    For each season, fit the rank curve on *earlier* seasons only, project the
+    preseason ECR snapshot through it, and attach realized points. That gives
+    the (projection, actual) pairs `calibration.fit_slopes` needs to measure how
+    much of a position's projected spread actually materializes — replacing the
+    generic priors with numbers from this league's own scoring.
+
+    `top_n` restricts each position to the players you would plausibly draft.
+    Including the whole pool measures something else: the deep tail is mostly
+    "starters outscore backups", the pools differ in depth by position, and the
+    slopes it produces differ from position to position in ways that vanish once
+    you look only at draftable players.
+
+    Seasons without a preseason ECR snapshot are skipped, so this returns pairs
+    for 2021 onward regardless of what is asked for.
+    """
+    frames = []
+    for season in sorted(seasons):
+        train = [s for s in totals["season"].unique() if s < season]
+        if not train:
+            continue
+        try:
+            ecr, _, _ = preseason_ecr(rankings, season, cw)
+        except ValueError:
+            continue  # no snapshot that year; 2020 and earlier
+
+        from ..features.rank_curve import fit_rank_curve
+        curve = fit_rank_curve(
+            totals[totals["season"].isin(train)], downweight=downweight)
+
+        sub = ecr[ecr["pos_rank"] <= top_n].copy()
+        sub["projection"] = curve.points_for_ranks(sub["position"], sub["pos_rank"])
+
+        realized = totals[totals["season"] == season].set_index("player_key")["points"]
+        sub["actual"] = sub["player_key"].map(realized).fillna(0.0)
+        sub["season"] = season
+        frames.append(sub[["season", "position", "player_key", "pos_rank",
+                           "projection", "actual"]])
+
+    if not frames:
+        return pd.DataFrame(
+            columns=["season", "position", "player_key", "pos_rank",
+                     "projection", "actual"])
+    return pd.concat(frames, ignore_index=True)
+
+
 def preseason_ecr(rankings: pd.DataFrame, season: int, cw, *,
                   page: str = ECR_PAGE) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """The last ECR snapshot taken before season `season` kicked off.
