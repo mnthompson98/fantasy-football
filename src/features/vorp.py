@@ -33,7 +33,7 @@ class LeagueShape:
                 flex += 1
             else:
                 counts[s] = counts.get(s, 0) + 1
-        teams = cfg.get("assumed_2026", {}).get("teams") or cfg["verified"].get("teams", 10)
+        teams = int(cfg["verified"].get("teams", 10))
         return cls(
             teams=teams,
             starters=counts,

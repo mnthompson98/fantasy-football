@@ -1,8 +1,9 @@
 # League configuration.
 #
-# Values under `verified:` were pulled from the Sleeper API and confirmed.
-# Values under `assumed_2026:` are placeholders until the 2026 league is created —
-# re-run `python -m scripts.verify_league_settings <league_id>` and promote them.
+# Values under `verified:` were pulled from the Sleeper API and confirmed against
+# the live 2026 league. Re-run `python -m scripts.verify_league_settings
+# <league_id>` after any settings change — replacement level, scoring and waiver
+# logic all depend on them.
 
 user:
   sleeper_username: marwomp
@@ -40,7 +41,26 @@ excluded:
   - name: Premier League Lads  # 2025, 6-team 2QB novelty
     league_id: "1259985349774413824"
 
+# The league being drafted for. Confirmed against the Sleeper API on 2026-08-30
+# with `python -m scripts.verify_league_settings 1389723592727461888`: all nine
+# checked settings match, including the roster shape that used to be assumed.
+current:
+  season: 2026
+  name: "Camden?"
+  league_id: "1389723592727461888"
+  draft_id: "1389723592727461889"
+  previous_league_id: "1262443299793276928"
+  draft_type: snake
+  rounds: 16
+  # Draft order is not set yet (`draft_order: null`, no start_time). You cannot
+  # know `--my-slot` for the monitor until the commissioner sets it.
+  my_slot: null
+
 verified:
+  # Promoted from `assumed_2026` once the 2026 league existed and agreed.
+  teams: 10
+  bench_slots: 7
+  roster_size: 16
   scoring_format: ppr
   waiver_type: 0            # 0 = rolling waiver order. NOT FAAB.
   waiver_type_name: rolling_priority
@@ -52,12 +72,6 @@ verified:
   trade_deadline_week: 11
   starters: [QB, RB, RB, WR, WR, TE, FLEX, K, DEF]
   flex_eligible: [RB, WR, TE]
-
-assumed_2026:
-  teams: 10
-  bench_slots: 7
-  roster_size: 16
-  # TODO: confirm once the 2026 league exists.
 
 backtest:
   # 2020 start: modern rules + complete FantasyPros ADP coverage.

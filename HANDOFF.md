@@ -3,25 +3,29 @@
 **Last updated:** 2026-08-30
 **Repo:** https://github.com/mnthompson98/fantasy-football
 **Branch:** main
-**Tests:** 99/99 passing on Python 3.14
+**Tests:** 119/119 passing on Python 3.14
+**2026 league:** `Camden?` · league `1389723592727461888` · draft `1389723592727461889` · 10 teams · 16 rounds · snake · pre_draft
 
 ---
 
 ## The four commands
 
 ```bash
-# 1. Confirm the league is what the config thinks it is. Run this first.
-.venv/Scripts/python.exe -m scripts.verify_league_settings <2026_league_id>
+# 1. Confirm nothing changed. Run this first, every time.
+.venv/Scripts/python.exe -m scripts.verify_league_settings 1389723592727461888
 
 # 2. Build the board. Do this again the morning of the draft.
-.venv/Scripts/python.exe -m scripts.build_draft_board --league-id <2026_league_id> --refresh
+.venv/Scripts/python.exe -m scripts.build_draft_board --league-id 1389723592727461888 --refresh
 
-# 3. During the draft.
-.venv/Scripts/python.exe -m src.draft.monitor --draft-id <draft_id> --my-slot <n>
+# 3. During the draft. `--my-slot` is your draft position, 1-10.
+.venv/Scripts/python.exe -m src.draft.monitor --draft-id 1389723592727461889 --my-slot <n>
 
 # 4. Whenever you change the valuation, check it against 2022-2025.
 .venv/Scripts/python.exe -m scripts.run_backtest --drafts 40 --label what-changed
 ```
+
+**You do not know `--my-slot` yet.** The commissioner has not set the draft
+order (`draft_order: null`, no start time). Check Sleeper once it is drawn.
 
 Set `PYTHONIOENCODING=utf-8` first — Windows defaults to cp1252 and will crash
 on the first accented player name.
@@ -119,9 +123,10 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
 ## What's NOT done (next steps)
 
 ### Before Thursday
-1. **Confirm the 2026 league settings** once the league exists —
-   `python -m scripts.verify_league_settings <league_id>`, then promote
-   `assumed_2026` (10 teams, 7 bench) to `verified` in `config/league.yaml`.
+1. ✅ **2026 league confirmed** — `Camden?`, league `1389723592727461888`,
+   draft `1389723592727461889`, 10 teams, 16 rounds, snake. All nine checked
+   settings matched and the roster shape has been promoted into `verified`.
+   Re-run `verify_league_settings` if the commissioner changes anything.
 2. **Rebuild the board the morning of the draft** with `--refresh`. The ECR
    snapshot is the perishable input; anything older than a day has missed news.
 3. **Do a mock draft with the monitor running** to shake out the ergonomics.

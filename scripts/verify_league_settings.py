@@ -47,7 +47,6 @@ def _bench(roster_positions: list[str]) -> int:
 def check(league: dict, cfg: dict) -> tuple[list[str], list[str]]:
     """Compare a live league to the config. Returns (agreements, mismatches)."""
     verified = cfg["verified"]
-    assumed = cfg.get("assumed_2026", {})
     settings = league.get("settings") or {}
     scoring = league.get("scoring_settings") or {}
     roster_positions = league.get("roster_positions") or []
@@ -85,11 +84,12 @@ def check(league: dict, cfg: dict) -> tuple[list[str], list[str]]:
 
     compare("starters", list(verified["starters"]), _starters(roster_positions))
 
-    if assumed:
-        compare("teams (assumed)", assumed.get("teams"),
-                settings.get("num_teams") or league.get("total_rosters"))
-        compare("bench_slots (assumed)", assumed.get("bench_slots"),
-                _bench(roster_positions))
+    # Roster shape drives replacement level, so a change here silently reprices
+    # the whole board.
+    compare("teams", verified.get("teams"),
+            settings.get("num_teams") or league.get("total_rosters"))
+    compare("bench_slots", verified.get("bench_slots"), _bench(roster_positions))
+    compare("roster_size", verified.get("roster_size"), len(roster_positions))
 
     return ok, bad
 
@@ -124,9 +124,11 @@ def main() -> int:
         return 1
 
     print(f"\nAll {len(ok)} checked settings match.")
-    if cfg.get("assumed_2026"):
-        print("If this is the 2026 league, promote `assumed_2026` into "
-              "`verified` in config/league.yaml and delete the TODO.")
+    current = cfg.get("current") or {}
+    if current.get("league_id") and current["league_id"] != args.league_id:
+        print(f"\nNote: config `current.league_id` is {current['league_id']}, "
+              f"not the league just checked. Update it if this is the one you "
+              f"are drafting.")
     return 0
 
 
