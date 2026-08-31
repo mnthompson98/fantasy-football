@@ -150,8 +150,21 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
 | `fitted-slopes+dropoff` | old | 4.90 | 0.532 | 389.9 | 2200 |
 | `caps-only-no-qbte-anchor` | old | 5.61 | 0.517 | 374.8 | 2167 |
 | `qb-te-anchor+caps` | old | 5.74 | 0.498 | 369.7 | 2141 |
-| **`caps+waiver-aware-scoring`** | **corrected** | **4.64** | **0.548** | **405.3** | **2294** |
+| `caps+waiver-aware-scoring` | corrected | 4.64 | 0.548 | 405.3 | 2294 |
 | `qbcap2+waiver-aware-CONTROL` | corrected | 4.73 | 0.528 | 411.1 | 2292 |
+| `qbte-anchor-RETEST-waiver-aware` | corrected | 4.78 | 0.531 | 404.2 | 2287 |
+| `rolling-window-3seasons` | corrected | 4.39 | 0.563 | 404.7 | 2307 |
+| **`rolling3+prekickoff-ecr`** (shipping) | **corrected** | **4.42** | **0.556** | **407.8** | **2310** |
+
+The shipping row beats `caps+waiver-aware-scoring` on all four metrics, so
+CLAUDE.md's adoption rule (improve playoff points without hurting season points)
+is satisfied without interpretation.
+
+**Two caveats on reading this table.** Rows under different scorers are not
+comparable at all. And `rolling-window-3seasons` and `rolling3+prekickoff-ecr`
+share a `config_hash` *and* a `git_commit` despite differing — the snapshot-date
+fix was a code change made in an uncommitted working tree. Commit between runs
+that change code, or the log cannot tell them apart.
 
 **Rows under different scorers are not comparable to each other.** The corrected
 scorer credits every team for streaming, so absolute points rise for everyone;
@@ -167,9 +180,36 @@ What moved the needle, in order:
 
 Tried and reverted: the QB/TE market anchor (cost 0.13 places).
 
-Per season under the shipping config: 2022 3.27, 2023 2.95, 2024 4.88,
-**2025 7.45**. 2025 is the one season it still loses badly and nobody has looked
-at why. That is the most promising thread left.
+### 2025 is not an outlier, it is the end of a trend — and it is unsolved
+
+Our whole edge is board-versus-market, since opponents draft near ADP. Rank
+correlation with realized points over each season's draftable top 160:
+
+| season | board ρ | ADP ρ | board edge | fold rank |
+|---|---|---|---|---|
+| 2022 | −0.582 | −0.486 | **+0.096** | 3.27 |
+| 2023 | −0.524 | −0.489 | +0.034 | 2.95 |
+| 2024 | −0.454 | −0.472 | −0.019 | 3.83 |
+| 2025 | −0.394 | −0.426 | **−0.033** | 7.62 |
+
+The board beat the market in 2022–23 and has lost to it since, decaying
+monotonically, and the fold ranks track it. So the question is not "what broke in
+2025" but "why is the edge eroding".
+
+**Ruled out so far:**
+
+- *QB/TE overdraft.* Real (the board takes ~10 QB in its top 60 against the
+  market's 5) but anchoring it moved 2025 by 0.03 — nothing.
+- *Stale training seasons.* The rolling 3-season window fixed **2024**
+  (4.88 → 3.83) and left 2025 alone.
+- *Post-kickoff ECR snapshot.* 2025 was genuinely using a snapshot taken after
+  the season opener. Fixed — and 2025 got slightly *worse* (7.53 → 7.62), which
+  is what removing a game of hindsight should do.
+
+**Still untested:** that the market simply got better and the edge was never
+durable. Four folds cannot separate that from a modelling flaw, and two of them
+now come from a rolling window that only differs in the last two seasons.
+Anything concluded from 2025 alone rests on 40 simulated drafts of one season.
 
 ### The scorer was punishing thin rosters for a missing feature
 
@@ -319,8 +359,8 @@ can be fit properly and this whole correction chain gets simpler.
 - **Opponents follow ADP with gaussian noise.** Real managers are worse than
   that in some ways and better in others. A strategy that only beats this field
   has not proven much.
-- **Rule changes.** The 2024 kickoff rule was a one-year anomaly; the config
-  downweights 2024 K/DEF to 0.3.
+- **Season downweighting is off.** The 2024 K/DEF downweight was removed on
+  the manager's call rather than tested. `backtest.downweight` is `[]`.
 
 ### Realistic expectations
 - Best-in-class seasonal projections explain ~14–26% of within-position variance

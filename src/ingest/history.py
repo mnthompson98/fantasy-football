@@ -24,8 +24,31 @@ ECR_PAGE = "redraft-overall"
 
 # A preseason snapshot is one taken in this window. Late enough to have the
 # depth charts, early enough that no regular-season game has been played.
+#
+# The end of the window is derived from the schedule, not hardcoded. The NFL
+# opener has crept earlier every year — 2020-09-10 through 2025-09-04 — and a
+# fixed cutoff silently became wrong: the 2025 fold was picking up a 2025-09-05
+# snapshot, taken *after* that season's Thursday opener, while every other fold
+# used a pre-opener one. One game of hindsight is small, but it is regular-season
+# information about the season being predicted, which is precisely what this
+# repo refuses to allow.
 PRESEASON_START = "07-01"
-PRESEASON_END = "09-05"
+
+# Fallback if the schedule cannot be read. Safe for every opener through 2026.
+PRESEASON_END_FALLBACK = "09-03"
+
+
+def season_opener(season: int) -> str:
+    """The date of the season's first regular-season game, as MM-DD."""
+    try:
+        sched = nv.load_schedules([season])
+        reg = sched[sched["game_type"] == "REG"]
+        first = pd.to_datetime(reg["gameday"], errors="coerce").min()
+        if pd.notna(first):
+            return first.strftime("%m-%d")
+    except Exception:
+        pass
+    return PRESEASON_END_FALLBACK
 
 
 def scored_weekly(seasons: list[int], scoring: Scoring, *,
@@ -132,14 +155,17 @@ def preseason_ecr(rankings: pd.DataFrame, season: int, cw, *,
     keeps overall and positional rank consistent with each other, which matters
     because VORP compares across positions.
     """
+    # Strictly before kickoff: a snapshot taken on opening day already knows
+    # something about the season it is meant to predict.
+    end = f"{season}-{season_opener(season)}"
     df = rankings[rankings["page_type"] == page].copy()
     dates = pd.to_datetime(df["scrape_date"], errors="coerce")
-    window = (dates >= f"{season}-{PRESEASON_START}") & (dates <= f"{season}-{PRESEASON_END}")
+    window = (dates >= f"{season}-{PRESEASON_START}") & (dates < end)
     df = df[window]
     if df.empty:
         raise ValueError(
             f"no preseason '{page}' ECR snapshot for {season} between "
-            f"{season}-{PRESEASON_START} and {season}-{PRESEASON_END}. "
+            f"{season}-{PRESEASON_START} and {end} (kickoff). "
             f"ffverse coverage starts in 2021; earlier seasons can be trained "
             f"on but not targeted."
         )

@@ -63,12 +63,22 @@ class BacktestConfig:
     need_penalty: float = 0.4
     value_col: str = "vorp"
     min_train_seasons: int = 2
+    # None = expanding window (every season up to the purge gap). An integer
+    # keeps only that many of the most recent training seasons.
+    max_train_seasons: int | None = None
     # How many of each position is worth owning. None keeps ValueDrafter's
     # defaults; config/league.yaml `draft_policy.position_caps` overrides.
     caps: dict[str, int] | None = None
     # Credit an unfilled starting slot with what a streamer scored that week.
     # Off, the scorer punishes thin rosters for the absence of a waiver wire.
     model_waivers: bool = True
+    # The parts of config/league.yaml that decide how players are *valued*:
+    # blend weights, calibration, market anchor, season downweighting. They live
+    # outside this dataclass but they change the answer, so they belong in the
+    # hash. Without them two runs comparing anchor-on against anchor-off log the
+    # same `config_hash` and the run record cannot tell them apart — which is
+    # exactly the failure CLAUDE.md calls a bug.
+    valuation: dict | None = None
 
     def hash(self) -> str:
         payload = json.dumps(
@@ -84,6 +94,13 @@ def build_folds(cfg: BacktestConfig) -> list[FoldSpec]:
 
     The earliest seasons are consumed as training only — a fold needs at least
     `min_train_seasons` behind it to be worth scoring.
+
+    `max_train_seasons` turns the expanding window into a rolling one, keeping
+    only the most recent N training seasons. Worth testing because the board's
+    edge over the market decays across folds (+0.096 rank correlation in 2022,
+    −0.033 by 2025) while the training window grows — consistent with old
+    seasons transferring badly and dragging the curve toward a game that is no
+    longer being played.
     """
     seasons = sorted(cfg.seasons)
     folds: list[FoldSpec] = []
@@ -92,6 +109,8 @@ def build_folds(cfg: BacktestConfig) -> list[FoldSpec]:
         train = [s for s in seasons if s <= target - cfg.purge_gap]
         if len(train) < cfg.min_train_seasons:
             continue
+        if cfg.max_train_seasons:
+            train = train[-int(cfg.max_train_seasons):]
         assert_purge_gap(train, target, cfg.purge_gap)
         folds.append(FoldSpec(
             target_season=target,

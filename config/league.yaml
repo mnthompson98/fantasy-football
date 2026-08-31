@@ -64,11 +64,21 @@ backtest:
   seasons: [2020, 2021, 2022, 2023, 2024, 2025]
   purge_gap_seasons: 1
   seed: 20260830
-  # 2024 kickoff rule was a one-year anomaly; special teams scoring doesn't transfer.
-  downweight:
-    - season: 2024
-      positions: [K, DEF]
-      weight: 0.3
+
+  # Keep only the most recent N training seasons (rolling window) instead of
+  # every season up to the purge gap (expanding). Null = expanding.
+  #
+  # Under test: the board's rank-correlation edge over ADP decays across folds
+  # (+0.096 in 2022, +0.034 in 2023, -0.019 in 2024, -0.033 in 2025) while the
+  # training window grows, which is what you would see if old seasons transfer
+  # badly and drag the rank curve toward a game nobody is playing any more.
+  max_train_seasons: 3
+  # Season downweighting is off. The 2024 K/DEF downweight (kickoff-rule
+  # anomaly) was removed by the manager's call rather than tested; K and DEF are
+  # market-anchored now, so their curve barely reaches the board anyway.
+  # `fit_rank_curve` accepts a list of {season, positions, weight} here if a
+  # future season needs discounting.
+  downweight: []
 
   # Opponent draft model: sample each opponent pick from a truncated normal
   # centered on ADP rank. Sigma is calibrated per position from historical ADP
@@ -179,7 +189,13 @@ market_anchor:
   positions:
     DEF: 1.0
     K: 0.7
-    # QB: 0.6 and TE: 0.5 were TRIED AND REVERTED. The realized-VOR analysis
+    # QB: 0.6 and TE: 0.5 were TRIED TWICE AND REJECTED TWICE. Under the old
+    # scorer they cost 0.13 places; that test was unfair, because the scorer
+    # punished deferring QB for an artifact. Re-run under the corrected
+    # waiver-aware scorer they still cost 0.14 (4.78 vs 4.64) and lost win rate
+    # (0.531 vs 0.548). Two independent tests, same direction. They also did
+    # nothing for the 2025 fold, which was the reason for the re-test: 7.42
+    # against 7.45. The QB overdraft is real but it is not what ails 2025. The realized-VOR analysis
     # above is real, but the conclusion drawn from it was wrong: anchoring these
     # two cost 0.84 places in the standings (4.90 -> 5.74) and every other
     # metric with it. Pushing QB toward market placement made the drafter defer

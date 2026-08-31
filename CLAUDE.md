@@ -69,12 +69,28 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   hindsight ranking dressed up as a projection. Preseason `redraft-overall`
   coverage starts in 2021, so **2020 can be trained on but never targeted**.
 
-- **Backtest window is 2020–2025, not 2010+.** Rule and environment changes make
-  older seasons weakly transferable, and FantasyPros ADP coverage thins out before
-  ~2014. Six seasons is enough for walk-forward with a purge gap. See
-  `src/backtest/walkforward.py`.
-- **2024 K/DEF is downweighted.** The 2024 kickoff rule was a one-year anomaly;
-  its special-teams scoring distribution does not transfer to 2026.
+- **Backtest window is 2020–2025, not 2010+, and training is a rolling
+  3-season window.** Rule and environment changes make older seasons weakly
+  transferable, and FantasyPros ADP coverage thins out before ~2014.
+
+  The original note here said six seasons was enough for an *expanding* window.
+  That was wrong in the direction it predicted: the board's rank-correlation edge
+  over ADP decayed across folds (+0.096 in 2022 to −0.033 in 2025) while the
+  window grew. `backtest.max_train_seasons: 3` fixed the 2024 fold outright
+  (4.88 → 3.83 in the standings) and improved every headline metric. Old seasons
+  transfer badly enough that more data actively hurts.
+- **Season downweighting is off.** A 2024 K/DEF downweight (kickoff-rule
+  anomaly) was carried here for a while and removed on the manager's call
+  without being scored. `backtest.downweight` is an empty list; it still accepts
+  `{season, positions, weight}` entries if a future season needs discounting.
+- **The preseason ECR snapshot must predate kickoff, and the cutoff is derived
+  from the schedule.** The NFL opener crept from 2020-09-10 to 2025-09-04, so a
+  hardcoded cutoff rotted silently: the 2025 fold was using a 2025-09-05
+  snapshot, taken after that season's Thursday opener, while every other fold
+  used a pre-opener one. `assert_preseason_only` missed it because the ECR frame
+  carries no week column. `history.season_opener` reads the first REG gameday
+  from `load_schedules` instead.
+
 - **An unfilled starting slot is scored at the streaming level, not zero.** The
   simulator has no waiver wire, so a one-QB roster fielded nobody at QB 3.1
   weeks a season and was charged the whole loss — a manager streams a

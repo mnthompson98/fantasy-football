@@ -58,6 +58,7 @@ def backtest_config(cfg: dict, *, drafts: int | None = None,
     return BacktestConfig(
         seasons=seasons or [int(s) for s in bt["seasons"]],
         purge_gap=int(bt.get("purge_gap_seasons", 1)),
+        max_train_seasons=bt.get("max_train_seasons") or None,
         seed=int(bt.get("seed", 20260830)),
         drafts_per_season=drafts if drafts is not None else 40,
         teams=shape.teams,
@@ -70,6 +71,12 @@ def backtest_config(cfg: dict, *, drafts: int | None = None,
         need_boost=float(opp.get("positional_need_boost", 1.6)),
         need_penalty=float(opp.get("positional_need_penalty", 0.4)),
         caps=(cfg.get("draft_policy", {}).get("position_caps") or None),
+        valuation={
+            "blend": cfg.get("blend", {}).get("components"),
+            "calibration": cfg.get("calibration"),
+            "market_anchor": cfg.get("market_anchor"),
+            "downweight": bt.get("downweight"),
+        },
     )
 
 
