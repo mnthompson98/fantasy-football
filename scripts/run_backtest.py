@@ -127,6 +127,13 @@ def make_board_builder(cfg: dict, *, totals: pd.DataFrame,
         board["player_id"] = board["player_key"]
         board["season"] = fold.target_season
 
+        # A pure-market baseline: same simulator, same pick policy, same roster
+        # rules -- but the player ordering is ADP instead of our valuation.
+        # Running with `--value-col adp_value` answers the question the rank
+        # correlations raise but cannot settle: does the projection pipeline
+        # earn its keep, or is the edge coming from the pick policy alone?
+        board["adp_value"] = -pd.to_numeric(board["adp_rank"], errors="coerce")
+
         if verbose:
             print(f"  {fold.target_season}: ECR {scrape_date} · "
                   f"{len(board)} players · train {train[0]}-{train[-1]} · "
@@ -145,12 +152,16 @@ def main() -> int:
     ap.add_argument("--label", default="",
                     help="tag for this run in outputs/backtests/runs.parquet")
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--value-col", default="vorp",
+                    help="what the drafter ranks by: 'vorp' (the board) or "
+                         "'adp_value' (pure market baseline)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     seasons = ([int(s) for s in args.seasons.split(",")]
                if args.seasons else None)
     bt_cfg = backtest_config(cfg, drafts=args.drafts, seasons=seasons)
+    bt_cfg.value_col = args.value_col
 
     folds = build_folds(bt_cfg)
     if not folds:

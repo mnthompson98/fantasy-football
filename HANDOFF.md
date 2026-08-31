@@ -274,7 +274,40 @@ What moved the needle, in order:
 
 Tried and reverted: the QB/TE market anchor (cost 0.13 places).
 
-### 2025 is not an outlier, it is the end of a trend — and it is unsolved
+### 2025 IS an outlier, and it is the most valuable open question
+
+**This supersedes an earlier reading in this file that called 2025 "the end of a
+trend". The draft-outcome evidence says otherwise.**
+
+Running the simulator with the player ordering swapped for raw ADP — same pick
+policy, same caps, same scorer, only the ranking changed — isolates what the
+valuation pipeline is worth:
+
+| season | board | pure ADP | board edge |
+|---|---|---|---|
+| 2022 | 3.28 | 4.28 | **+1.00** |
+| 2023 | 2.95 | 4.75 | **+1.80** |
+| 2024 | 3.82 | 5.00 | **+1.17** |
+| 2025 | 7.62 | 4.00 | **−3.62** |
+| all | 4.42 | 4.51 | +0.09 |
+
+The board beats the market by roughly **1.3 places in three seasons of four**,
+then loses by 3.6 in one. The aggregate near-tie is entirely that one season
+dragging down three good ones — and reading only the aggregate would have led
+to exactly the wrong conclusion, which is that the valuation adds nothing.
+
+At 40 drafts per season the per-season standard error on league rank is roughly
+0.4, so both the ~1.3 wins and the 3.6 loss are well outside noise *within the
+simulation*. Four folds is still four folds.
+
+**Reproduce with:** `--value-col adp_value` against the default `vorp`.
+
+The earlier rank-correlation table (below) showed a smooth decay and pointed at
+a gradual erosion. The draft outcomes do not agree: 2024 is a clear win, not a
+slide into parity. Where the two disagree, prefer the draft outcomes — they
+measure the thing the system actually does.
+
+### The rank-correlation view (kept, but it misled)
 
 Our whole edge is board-versus-market, since opponents draft near ADP. Rank
 correlation with realized points over each season's draftable top 160:

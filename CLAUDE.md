@@ -108,6 +108,14 @@ depend on these. The league payload also carries a vestigial
   projection MAE.** A model that projects accurately but drafts players who miss
   weeks 15–17 has not helped. Metric priority is encoded in
   `src/backtest/metrics.py` and must not be reordered casually.
+- **Always benchmark against raw ADP before believing the board adds anything.**
+  `run_backtest --value-col adp_value` swaps only the player ordering, holding
+  the pick policy, caps and scorer constant. Measured 2022-2025: the board beats
+  the market by ~1.3 places in 2022, 2023 and 2024, and loses by 3.6 in 2025.
+  The *aggregate* is a tie (4.42 vs 4.51) and reading only the aggregate would
+  say the valuation is worthless. It is not — one season is eating three.
+  **Diagnosing 2025 is worth more than any new model.**
+
 - **Aggregation beats a solo model.** The consensus blend ships before the ML
   model, and the ML model must beat the blend out-of-sample to be adopted. If it
   doesn't, we ship the blend. This is the single most important guardrail here.
