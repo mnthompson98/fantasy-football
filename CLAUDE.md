@@ -114,7 +114,12 @@ depend on these. The league payload also carries a vestigial
   the market by ~1.3 places in 2022, 2023 and 2024, and loses by 3.6 in 2025.
   The *aggregate* is a tie (4.42 vs 4.51) and reading only the aggregate would
   say the valuation is worthless. It is not — one season is eating three.
-  **Diagnosing 2025 is worth more than any new model.**
+  **2025 was diagnosed and there is no free fix.** ECR-only recovers ~2.1
+  places in 2025 and gives back 0.75 in 2022 and 2.2 in 2023; the mean does not
+  move. The production components are a variance position, not a bug. All three
+  configurations (blend 4.42, ADP 4.51, ECR-only 4.62) have the same expected
+  finish, and ADP has the best playoff points. **This is the noise floor of a
+  four-fold evaluation — further tuning is fitting the backtest, not learning.**
 
 - **Aggregation beats a solo model.** The consensus blend ships before the ML
   model, and the ML model must beat the blend out-of-sample to be adopted. If it

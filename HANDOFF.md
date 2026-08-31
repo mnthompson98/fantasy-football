@@ -302,6 +302,40 @@ simulation*. Four folds is still four folds.
 
 **Reproduce with:** `--value-col adp_value` against the default `vorp`.
 
+#### The 2025 collapse was diagnosed, and there is no free fix
+
+Hypothesis: 2025 is the only board leaning on **2024** production, so the
+`xfp_points` / `prior_points` components poisoned it. Tested by running
+ECR-only, everything else held constant (`DIAG-ecr-only-blend`):
+
+| season | blend (shipping) | ECR-only | pure ADP |
+|---|---|---|---|
+| 2022 | 3.28 | 4.03 | 4.28 |
+| 2023 | 2.95 | 5.18 | 4.75 |
+| 2024 | 3.82 | 3.82 | 5.00 |
+| 2025 | **7.62** | **5.48** | 4.00 |
+| mean | 4.42 | 4.62 | 4.51 |
+| sd | 1.88 | 0.71 | 0.39 |
+| playoff pts | 407.8 | 407.4 | **411.5** |
+
+The hypothesis was **half right and useless**. Dropping the production
+components recovers ~2.1 places in 2025 — and gives back 0.75 in 2022 and 2.2 in
+2023. The mean does not move. There is no scoped fix hiding here: the production
+components are a *variance position*, not a bug. They win big in some seasons and
+lose big in others.
+
+**The uncomfortable summary: all three configurations have the same expected
+finish (4.42 / 4.51 / 4.62, a spread of 0.2 places), and pure ADP has the best
+playoff points.** On the evidence available, the valuation machinery does not
+demonstrably beat drafting off consensus rank.
+
+Do not read the variance column too hard either — an sd computed on four
+observations, one of which drives it entirely, is not a reliable estimate.
+
+**This is the noise floor of a four-fold evaluation.** Seven configuration
+changes have now been measured on this sample. Further tuning is not learning;
+it is fitting the backtest. Stop.
+
 The earlier rank-correlation table (below) showed a smooth decay and pointed at
 a gradual erosion. The draft outcomes do not agree: 2024 is a clear win, not a
 slide into parity. Where the two disagree, prefer the draft outcomes — they
