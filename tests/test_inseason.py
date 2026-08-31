@@ -356,3 +356,89 @@ def test_the_report_leads_with_the_unvalidated_warning():
     assert "unvalidated" in md.lower()
     assert "Week 5" in md
     assert "nan" not in md.lower().replace("unvalidated", "")
+
+
+# --------------------------------------------------------------------------
+# Durability — measured, and deliberately not applied as an adjustment
+# --------------------------------------------------------------------------
+
+from src.features import availability as av  # noqa: E402
+
+
+def _weeks(player: str, pos: str, season: int, weeks: list[int]) -> list[dict]:
+    return [{"player_key": player, "position": pos, "season": season,
+             "week": w, "season_type": "REG", "fantasy_points": 10.0}
+            for w in weeks]
+
+
+def test_availability_is_measured_against_sixteen_games_not_seventeen():
+    """A team plays 16 games inside the 17 fantasy weeks. Dividing by 17 would
+    score a perfectly healthy season as 94% and make everyone look fragile."""
+    hist = av.availability_history(
+        pd.DataFrame(_weeks("a", "RB", 2024, list(range(1, 17)))))
+    assert hist["availability"].iloc[0] == pytest.approx(1.0)
+
+
+def test_cameo_seasons_are_excluded_from_the_history():
+    """Two games from a practice-squad callup is not a durability observation
+    about a starter; it would drag every positional mean down."""
+    hist = av.availability_history(
+        pd.DataFrame(_weeks("a", "RB", 2024, [1, 2])))
+    assert hist.empty
+
+
+def test_durability_uses_only_seasons_before_the_target():
+    rows = (_weeks("a", "RB", 2023, list(range(1, 17)))
+            + _weeks("a", "RB", 2024, list(range(1, 9)))
+            + _weeks("a", "RB", 2025, list(range(1, 17))))
+    hist = av.availability_history(pd.DataFrame(rows))
+    dur = av.durability(hist, as_of_season=2025)
+    # 2025 must not inform a 2025 draft: 1.0 and 0.5 average to 0.75 raw.
+    assert dur["durability_raw"].iloc[0] == pytest.approx(0.75)
+
+
+def test_a_thin_history_is_shrunk_toward_the_position():
+    rows = (_weeks("iron", "RB", 2024, list(range(1, 17)))
+            + _weeks("iron", "RB", 2023, list(range(1, 17)))
+            + _weeks("iron", "RB", 2022, list(range(1, 17)))
+            + _weeks("hurt", "RB", 2024, list(range(1, 9))))
+    hist = av.availability_history(pd.DataFrame(rows))
+    dur = av.durability(hist, as_of_season=2025).set_index("player_key")
+    # One season of 0.5 is pulled up toward the positional mean; three seasons
+    # of 1.0 barely move.
+    assert dur.loc["hurt", "durability"] > dur.loc["hurt", "durability_raw"]
+    assert dur.loc["iron", "durability"] > dur.loc["hurt", "durability"]
+
+
+def test_the_flag_fires_only_where_the_consensus_stops_pricing_durability():
+    """Measured 2021-2025: inside ECR 120 the durable/fragile gap in playoff
+    availability is +0.02; past it, +0.11. Flagging an early-round player would
+    invite a human to double-count what ECR already discounted."""
+    board = pd.DataFrame([
+        {"player_key": "early", "adp_rank": 30},
+        {"player_key": "late", "adp_rank": 200},
+    ])
+    dur = pd.DataFrame([
+        {"player_key": "early", "durability": 0.55,
+         "durability_seasons": 3, "durability_raw": 0.55},
+        {"player_key": "late", "durability": 0.55,
+         "durability_seasons": 3, "durability_raw": 0.55},
+    ])
+    out = av.attach(board, dur).set_index("player_key")
+    assert not bool(out.loc["early", "durability_flag"])
+    assert bool(out.loc["late", "durability_flag"])
+
+
+def test_a_durable_late_player_is_not_flagged():
+    board = pd.DataFrame([{"player_key": "x", "adp_rank": 200}])
+    dur = pd.DataFrame([{"player_key": "x", "durability": 0.92,
+                         "durability_seasons": 3, "durability_raw": 0.92}])
+    assert not bool(av.attach(board, dur)["durability_flag"].iloc[0])
+
+
+def test_a_player_with_no_history_is_never_flagged():
+    board = pd.DataFrame([{"player_key": "rookie", "adp_rank": 200}])
+    out = av.attach(board, pd.DataFrame(
+        columns=["player_key", "durability", "durability_seasons",
+                 "durability_raw"]))
+    assert not bool(out["durability_flag"].iloc[0])

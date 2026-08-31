@@ -35,6 +35,10 @@ BOARD_COLUMNS = [
     # How much the experts disagree. A tight best/worst is a consensus player;
     # a wide one is contested, which is where both the value and the busts are.
     "ecr_sd", "ecr_best", "ecr_worst",
+    # Share of the season this player has been available for, recent history,
+    # shrunk toward his position. `durability_flag` fires only past ECR ~120,
+    # where the consensus stops pricing it — see features/availability.py.
+    "durability", "durability_seasons", "durability_flag",
 ]
 
 
@@ -235,6 +239,9 @@ function render() {{
     // consensus pick at the same rank — worth seeing before you spend a pick.
     if (num(r.ecr_best, 0) !== '—' && num(r.ecr_worst, 0) !== '—')
       bits.push(num(r.ecr_best, 0) + '–' + num(r.ecr_worst, 0));
+    // Only shown where it carries information the consensus has not priced.
+    if (r.durability_flag === true || r.durability_flag === 'True')
+      bits.push('<span class="inj">' + Math.round(r.durability * 100) + '% avail</span>');
     const sub = bits.join(' · ');
     const soft = String(r.injury_status) === 'Questionable' ? ' soft' : '';
     const inj = r.injury_status

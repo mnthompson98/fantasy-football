@@ -33,6 +33,11 @@ from src.backtest.leakage_guard import (  # noqa: E402
     assert_no_future_seasons,
 )
 from src.draft.board import export, finalize_board  # noqa: E402
+from src.features.availability import (  # noqa: E402
+    attach as attach_durability,
+    availability_history,
+    durability,
+)
 from src.features.pipeline import ecr_to_pool, value_board  # noqa: E402
 from src.features.scoring import Scoring  # noqa: E402
 from src.features.slopes import fitted_slopes  # noqa: E402
@@ -148,6 +153,13 @@ def assemble(cfg: dict, *, refresh: bool = False, league_id: str | None = None,
         pool[pool["available"]], totals, cfg, slopes=slopes,
         train_seasons=hist_seasons, shape=shape, verbose=True,
     )
+
+    # Durability, from seasons strictly before the one being drafted. Attached
+    # as information, never as a projection adjustment: inside ECR 120 the
+    # consensus has already priced it and scaling would double-count.
+    hist = availability_history(
+        H.scored_weekly(hist_seasons, scoring, refresh=refresh))
+    valued = attach_durability(valued, durability(hist, target))
 
     board = finalize_board(valued, drop_unavailable=False)
     meta = {

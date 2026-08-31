@@ -121,6 +121,18 @@ depend on these. The league payload also carries a vestigial
   finish, and ADP has the best playoff points. **This is the noise floor of a
   four-fold evaluation — further tuning is fitting the backtest, not learning.**
 
+- **Durability is measured, surfaced, and deliberately not applied.** Over
+  2012-2025 availability persists year to year at rho ~0.36 (QB 0.55, RB 0.32)
+  and a three-season history beats one. But inside ECR rank buckets the
+  durable-vs-fragile gap in playoff availability is +0.02 for the top 60 and
+  +0.11 only past ECR 120; the raw 0.380 correlation falls to 0.148 once rank is
+  controlled for. The consensus already prices durability where it is paying
+  attention. So `features/availability.py` ships a board column and a flag that
+  fires only past ECR 120 — scaling a top-60 projection by durability would
+  double-count, the same error as adjusting for weather the experts have seen.
+  This is the one feature validated on ~4,800 player-seasons rather than four
+  folds.
+
 - **Aggregation beats a solo model.** The consensus blend ships before the ML
   model, and the ML model must beat the blend out-of-sample to be adopted. If it
   doesn't, we ship the blend. This is the single most important guardrail here.
