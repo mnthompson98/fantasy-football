@@ -19,9 +19,42 @@ import pandas as pd
 RAW_DIR = Path("data/raw")
 
 # Rankings are re-scraped daily by ffverse; anything older than this is stale
-# for draft purposes. Season stats for completed seasons never change.
+# for draft purposes. Season stats for *completed* seasons never change.
 FRESH_HOURS_RANKINGS = 12.0
 FRESH_HOURS_STATIC = 24.0 * 7
+
+# Weekly rankings are the perishable input to every in-season decision: they
+# move on injury news right up to kickoff. Six hours is short enough to catch
+# Sunday-morning actives without hammering the host.
+FRESH_HOURS_WEEKLY = 6.0
+
+# A *live* season's box scores change every week, so the week-long TTL that is
+# correct for finished seasons would serve a stale frame all the way to the next
+# Tuesday. Any pull whose season range includes the current season gets this
+# instead — otherwise `start_sit` in week 6 could be reasoning about week 4.
+FRESH_HOURS_LIVE_SEASON = 6.0
+
+
+def _current_season() -> int:
+    """The season nflverse considers active.
+
+    Falls back to the calendar year rather than raising: being wrong here makes
+    the cache slightly too eager, which is the safe direction.
+    """
+    try:
+        import nflreadpy as nfl
+        return int(nfl.get_current_season())
+    except Exception:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        return now.year if now.month >= 3 else now.year - 1
+
+
+def _freshness_for(seasons: Sequence[int]) -> float:
+    """Week-long cache for settled history, six hours once a live season is in."""
+    if any(int(s) >= _current_season() for s in seasons):
+        return FRESH_HOURS_LIVE_SEASON
+    return FRESH_HOURS_STATIC
 
 
 def _cache_path(name: str, cache_dir: Path | str | None = None) -> Path:
@@ -106,6 +139,40 @@ def load_ff_rankings_history(*, cache_dir: Path | str | None = None,
                    cache_dir=cache_dir, refresh=refresh)
 
 
+def load_ff_rankings_weekly(*, cache_dir: Path | str | None = None,
+                            refresh: bool = False) -> pd.DataFrame:
+    """This week's FantasyPros rankings — **with point projections**.
+
+    A different product from the draft rankings, and a different schema. It
+    carries `r2p_pts`, FantasyPros' projected points for the coming week, plus
+    `sd` (expert disagreement), the opponent, the bye week and a start/sit
+    grade. The skill-position pages are the PPR variants (`ppr-rb`, `ppr-wr`,
+    `ppr-te`), which is this league's scoring.
+
+    **It is a live snapshot of the current week only** — there is no archive, so
+    in-season decisions can be made from it but not backtested against it.
+    Anything relying on this is unvalidated by construction; say so.
+    """
+    import nflreadpy as nfl
+    return _cached("ff_rankings_weekly",
+                   lambda: nfl.load_ff_rankings(type="week"),
+                   max_age_hours=FRESH_HOURS_WEEKLY,
+                   cache_dir=cache_dir, refresh=refresh)
+
+
+def load_injuries(seasons: Sequence[int], *,
+                  cache_dir: Path | str | None = None,
+                  refresh: bool = False) -> pd.DataFrame:
+    """Weekly injury report — practice participation and game status."""
+    import nflreadpy as nfl
+    seasons = [int(s) for s in seasons]
+    return _cached(
+        f"injuries_{_seasons_key(seasons)}",
+        lambda: nfl.load_injuries(seasons=seasons),
+        max_age_hours=_freshness_for(seasons), cache_dir=cache_dir, refresh=refresh,
+    )
+
+
 def load_ff_playerids(*, cache_dir: Path | str | None = None,
                       refresh: bool = False) -> pd.DataFrame:
     """DynastyProcess ID crosswalk: gsis, sleeper, fantasypros, pfr, and more."""
@@ -128,7 +195,7 @@ def load_ff_opportunity(seasons: Sequence[int], *,
     return _cached(
         f"ff_opportunity_{_seasons_key(seasons)}",
         lambda: nfl.load_ff_opportunity(seasons=seasons, stat_type="weekly"),
-        max_age_hours=FRESH_HOURS_STATIC, cache_dir=cache_dir, refresh=refresh,
+        max_age_hours=_freshness_for(seasons), cache_dir=cache_dir, refresh=refresh,
     )
 
 
@@ -141,7 +208,7 @@ def load_player_stats(seasons: Sequence[int], *,
     return _cached(
         f"player_stats_{_seasons_key(seasons)}",
         lambda: nfl.load_player_stats(seasons=seasons, summary_level="week"),
-        max_age_hours=FRESH_HOURS_STATIC, cache_dir=cache_dir, refresh=refresh,
+        max_age_hours=_freshness_for(seasons), cache_dir=cache_dir, refresh=refresh,
     )
 
 
@@ -154,7 +221,7 @@ def load_team_stats(seasons: Sequence[int], *,
     return _cached(
         f"team_stats_{_seasons_key(seasons)}",
         lambda: nfl.load_team_stats(seasons=seasons, summary_level="week"),
-        max_age_hours=FRESH_HOURS_STATIC, cache_dir=cache_dir, refresh=refresh,
+        max_age_hours=_freshness_for(seasons), cache_dir=cache_dir, refresh=refresh,
     )
 
 
@@ -167,5 +234,5 @@ def load_schedules(seasons: Sequence[int], *,
     return _cached(
         f"schedules_{_seasons_key(seasons)}",
         lambda: nfl.load_schedules(seasons=seasons),
-        max_age_hours=FRESH_HOURS_STATIC, cache_dir=cache_dir, refresh=refresh,
+        max_age_hours=_freshness_for(seasons), cache_dir=cache_dir, refresh=refresh,
     )

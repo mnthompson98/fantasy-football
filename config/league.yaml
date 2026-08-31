@@ -229,6 +229,18 @@ market_anchor:
 # The cap is a ceiling, not a target. RB and WR are deliberately absent: bench
 # depth at those positions is real, because of the flex and because of injury
 # attrition.
+# In-season waiver policy. The league uses ROLLING PRIORITY, not FAAB, so a
+# successful claim costs your place in the queue and there is no such thing as a
+# small bid. The threshold is therefore a high bar, not a positive one: a claim
+# has to buy a starter, because the alternative is keeping the ability to claim
+# the next league-winner.
+#
+# Expressed in projected points added to this week's starting lineup, after
+# accounting for whoever gets dropped. Free-agent adds (a streaming kicker, a
+# bye-week fill) cost no priority and are never held to this bar.
+waivers:
+  priority_threshold: 4.0
+
 draft_policy:
   position_caps:
     QB: 1

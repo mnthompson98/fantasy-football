@@ -19,8 +19,9 @@ Tranche 1 does not depend on tranche 2. Never let tranche 2 work break tranche 1
 
 ## Verified league settings — do not re-derive these
 
-Pulled from the Sleeper API on 2026-08-30, confirmed for both the 2021 and 2025
-league instances. These were *assumptions* in the original plan; they are now facts.
+Pulled from the Sleeper API on 2026-08-30 and confirmed against the **live 2026
+league** (`1389723592727461888`, draft `1389723592727461889`) as well as the 2021
+and 2025 instances. These were assumptions in the original plan; they are facts.
 
 | Setting | Value | Note |
 |---|---|---|
@@ -31,15 +32,17 @@ league instances. These were *assumptions* in the original plan; they are now fa
 | `trade_deadline` | `11` | Week 11. |
 | Scoring | full PPR | |
 | Starters | `QB, RB, RB, WR, WR, TE, FLEX, K, DEF` | 9 starters |
-| Bench | 6 (2021) → 7 (2025) | Assume 7 for 2026 until confirmed. |
-| League size | 8 (2021) → 10 (2025) | Assume 10 for 2026 until confirmed. |
+| Bench | 7 | Confirmed on the 2026 league; 16 roster spots total. |
+| League size | 10 | Confirmed on the 2026 league. |
 
 **Consequence:** all FAAB bidding logic is out of scope. Waiver priority is a
 *positional* resource — burn it only on true difference-makers. See
 `src/inseason/waivers.py`.
 
-Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
-2026 league exists. Do not hardcode 2026 assumptions before that.
+Re-verify with `python -m scripts.verify_league_settings 1389723592727461888`
+after any settings change — replacement level, scoring and waiver logic all
+depend on these. The league payload also carries a vestigial
+`settings.draft_rounds: 3`; the draft object says 16, which is the real number.
 
 ## Code conventions
 
@@ -141,6 +144,38 @@ Re-verify with `python -m scripts.verify_league_settings <league_id>` once the
   What we get instead is their **expert consensus ranking**, redistributed by
   ffverse (`nflreadpy.load_ff_rankings`), which `src/features/rank_curve.py`
   converts to points through a historical positional rank→points curve.
+
+- **In-season decisions are unvalidated, and the code says so.** FantasyPros'
+  weekly ranking product carries real point projections (`r2p_pts`, PPR for the
+  skill positions) plus per-player `sd`, and ffverse redistributes it — but it
+  is a **live snapshot of the current week with no archive**. Nothing built on
+  it can be backtested the way the draft board was. `scripts/weekly_update.py`
+  states this in its own output; do not let a tidy table imply otherwise.
+
+- **Every in-season question is the same question:** does this change my best
+  legal starting lineup? Start/sit, waivers and trades all route through
+  `src/features/lineup.py` so they cannot drift apart. A trade valued by adding
+  up player rankings ignores your roster and is wrong in a way that costs
+  points; a waiver pickup is worth his *upgrade*, not his projection.
+
+- **A waiver claim costs your place in the queue, so the bar is high, not
+  positive.** Rolling priority has no small bid — every claim is all-in. A
+  player who adds two points is not worth surrendering the ability to claim the
+  next league-winner. `config: waivers.priority_threshold` (4.0 points added to
+  the starting lineup). Streaming a kicker or a bye-week fill from *free agency*
+  costs nothing and is never held to that bar.
+
+- **Position and team codes differ per source, and getting it wrong is not
+  cosmetic.** DynastyProcess spells kicker `PK` and uses its own team codes
+  (`GBP`, `KCC`, `NEP`, `NOS`, `TBB`, `RAM`, `SDC`). Before `PK` was aliased,
+  a roster's kicker did not count as a `K`: the lineup reported the K slot
+  unfilled and every kicker on the wire scored as a +8 upgrade worth burning
+  waiver priority on, every single week. `player_ids.POSITION_ALIASES`.
+
+- **Cache freshness is season-aware.** A finished season's box scores never
+  change and cache for a week; a *live* season's change every Sunday. Any pull
+  whose range includes the current season gets a six-hour TTL instead, or
+  `start_sit` in week 6 would reason about week 4. `nflverse._freshness_for`.
 
 - **Roster shape is the manager's call, not the model's.** He drafts one QB and
   one TE — a second TE only when the remaining tight ends beat the other flex

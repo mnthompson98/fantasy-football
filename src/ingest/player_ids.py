@@ -32,18 +32,27 @@ import pandas as pd
 # else is already consistent. nflverse uses LA/JAC in places, FantasyPros and
 # Sleeper use LAR/JAX.
 TEAM_ALIASES = {
-    "LA": "LAR", "STL": "LAR", "SL": "LAR",
+    "LA": "LAR", "STL": "LAR", "SL": "LAR", "RAM": "LAR",
     "JAC": "JAX",
     "OAK": "LV", "LVR": "LV",
-    "SD": "LAC",
+    "SD": "LAC", "SDC": "LAC",
     "WSH": "WAS", "WFT": "WAS",
     "ARZ": "ARI", "BLT": "BAL", "CLV": "CLE", "HST": "HOU",
     "GNB": "GB", "KAN": "KC", "NWE": "NE", "NOR": "NO", "SFO": "SF", "TAM": "TB",
+    # DynastyProcess `ff_playerids` uses its own three-letter codes.
+    "GBP": "GB", "KCC": "KC", "NEP": "NE", "NOS": "NO", "TBB": "TB",
 }
 
 # Sources spell the team-defense position three ways. Everything becomes DEF,
 # which is what Sleeper's roster slots use.
 DEF_ALIASES = {"DST", "D/ST", "DEF", "D"}
+
+# DynastyProcess spells kicker `PK`; Sleeper and FantasyPros both say `K`.
+# Getting this wrong is not cosmetic: a roster whose kicker is labelled PK has
+# no `K`, so the lineup optimiser reports the K slot unfilled and every kicker
+# on the waiver wire scores as a +8 upgrade worth burning waiver priority on.
+# That is exactly what happened before this alias existed.
+POSITION_ALIASES = {"PK": "K", "FB": "RB"}
 
 _SUFFIXES = re.compile(r"\b(jr|sr|ii|iii|iv|v)\b")
 _NONALPHA = re.compile(r"[^a-z ]")
@@ -64,7 +73,9 @@ def normalize_position(pos: object) -> str | None:
     p = str(pos).strip().upper()
     if not p:
         return None
-    return "DEF" if p in DEF_ALIASES else p
+    if p in DEF_ALIASES:
+        return "DEF"
+    return POSITION_ALIASES.get(p, p)
 
 
 def merge_name(name: object) -> str:

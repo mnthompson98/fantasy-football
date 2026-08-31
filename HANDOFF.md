@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30
 **Repo:** https://github.com/mnthompson98/fantasy-football
 **Branch:** main
-**Tests:** 119/119 passing on Python 3.14
+**Tests:** 143/143 passing on Python 3.14
 **2026 league:** `Camden?` · league `1389723592727461888` · draft `1389723592727461889` · 10 teams · 16 rounds · snake · pre_draft
 
 ---
@@ -82,7 +82,14 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
 - ✅ `scripts/build_draft_board.py` — **the board, end to end**
 - ✅ `scripts/verify_league_settings.py` — check a live league against the config
 - ✅ `scripts/run_backtest.py` — **walk-forward, on real historical ECR**
-- ✅ 99 unit tests
+- ✅ `src/features/lineup.py` — best legal lineup; shared by all three in-season modules
+- ✅ `src/inseason/projections.py` — weekly FantasyPros points, canonically keyed
+- ✅ `src/inseason/roster.py` — who owns whom, from Sleeper
+- ✅ `src/inseason/start_sit.py` — lineup + close calls, with uncertainty
+- ✅ `src/inseason/waivers.py` — rolling-priority claims vs free streaming
+- ✅ `src/inseason/trades.py` — trades valued by lineup change, not rankings
+- ✅ `scripts/weekly_update.py` — **the weekly run, incl. `--check-only` ingestion health**
+- ✅ 143 unit tests
 
 ### The pipeline the board actually runs
 
@@ -140,7 +147,10 @@ simulated draft plus an aggregate, tagged with the git commit and config hash.
    - persistence shrink on vs off
 5. **XGBoost projection model** — must beat the blend out-of-sample or the blend
    ships.
-6. **In-season automation** — `start_sit.py`, `waivers.py`, `trades.py`.
+6. ✅ **In-season automation built** — `start_sit.py`, `waivers.py`,
+   `trades.py`, driven by `scripts/weekly_update.py`. **Unvalidated by
+   construction:** the weekly FantasyPros feed is a live snapshot with no
+   archive, so unlike the draft board none of it can be backtested.
 
 ---
 
