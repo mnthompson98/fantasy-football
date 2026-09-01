@@ -33,10 +33,12 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.backtest.draft_sim import league_opponent  # noqa: E402
 from src.backtest.leakage_guard import (  # noqa: E402
     assert_no_future_seasons,
     assert_purge_gap,
 )
+from src.backtest.opponent_fit import TendencyFitter  # noqa: E402
 from src.backtest.walkforward import BacktestConfig, build_folds, run_backtest  # noqa: E402
 from src.features.pipeline import ecr_to_pool, value_board  # noqa: E402
 from src.features.scoring import Scoring  # noqa: E402
@@ -51,11 +53,13 @@ CONFIG = ROOT / "config" / "league.yaml"
 
 
 def backtest_config(cfg: dict, *, drafts: int | None = None,
-                    seasons: list[int] | None = None) -> BacktestConfig:
+                    seasons: list[int] | None = None,
+                    opponent: str | None = None) -> BacktestConfig:
     bt = cfg["backtest"]
     shape = LeagueShape.from_config(cfg)
     opp = bt.get("opponent_model", {})
     return BacktestConfig(
+        opponent=str(opponent or opp.get("model", "gaussian")),
         seasons=seasons or [int(s) for s in bt["seasons"]],
         purge_gap=int(bt.get("purge_gap_seasons", 1)),
         max_train_seasons=bt.get("max_train_seasons") or None,
@@ -143,10 +147,44 @@ def make_board_builder(cfg: dict, *, totals: pd.DataFrame,
     return build
 
 
+def make_opponent_provider(cfg: dict, *, rankings: pd.DataFrame, crosswalk,
+                           opponent: str):
+    """Return `provider(fold, bt_cfg) -> (factory, provenance)`, or None.
+
+    `"gaussian"` returns None, which leaves `simulate_draft` building exactly
+    the opponent it always built — the recorded baseline has to keep
+    reproducing bit-for-bit, and the surest way to guarantee that is for the
+    default path not to run any new code at all.
+
+    `"league"` fits `src/backtest/opponent_fit.py` to this league's own drafts,
+    per fold and using only drafts held before that fold's season.
+    """
+    if opponent == "gaussian":
+        return None
+    if opponent != "league":
+        raise ValueError(
+            f"unknown opponent model {opponent!r}; expected 'gaussian' or "
+            f"'league'")
+
+    opp = cfg["backtest"].get("opponent_model", {}) or {}
+    fitter = TendencyFitter(
+        rankings, crosswalk,
+        scope=str(opp.get("fit_scope", "prior")),
+        over_ceiling_penalty=float(opp.get("over_ceiling_penalty", 8.0)),
+    )
+
+    def provider(fold, bt_cfg):
+        tend = fitter.for_season(fold.target_season)
+        return league_opponent(tend), tend.provenance
+
+    return provider
+
+
 def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
              drafts: int | None = None, seasons: list[int] | None = None,
              label: str = "", refresh: bool = False, verbose: bool = True,
-             output_dir: Path | None = None) -> dict[str, pd.DataFrame]:
+             output_dir: Path | None = None,
+             opponent: str | None = None) -> dict[str, pd.DataFrame]:
     """Run the walk-forward once per `value_col`, sharing the loaded history.
 
     Factored out of `main` so the parity check
@@ -160,7 +198,8 @@ def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
     scoring = Scoring.from_league(None)
     if verbose:
         print("\nscoring history and building the crosswalk...")
-    base = backtest_config(cfg, drafts=drafts, seasons=seasons)
+    base = backtest_config(cfg, drafts=drafts, seasons=seasons,
+                           opponent=opponent)
     crosswalk = build_crosswalk(nv.load_ff_playerids(refresh=refresh))
     weekly = H.scored_weekly(base.seasons, scoring, refresh=refresh)
     totals = H.season_totals_for(base.seasons, scoring)
@@ -174,9 +213,19 @@ def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
         columns={"player_key": "player_id", "fantasy_points": "points"})
     weekly_actuals = weekly_actuals[weekly_actuals["season_type"] == "REG"]
 
+    # The opponent field is fitted once and shared across value columns: it is
+    # the same field in both runs by construction, which is what makes the
+    # board-vs-ADP comparison a comparison of orderings.
+    provider = make_opponent_provider(cfg, rankings=rankings,
+                                      crosswalk=crosswalk,
+                                      opponent=base.opponent)
+    if verbose:
+        print(f"  opponent model: {base.opponent}")
+
     out: dict[str, pd.DataFrame] = {}
     for value_col in value_cols:
-        bt_cfg = backtest_config(cfg, drafts=drafts, seasons=seasons)
+        bt_cfg = backtest_config(cfg, drafts=drafts, seasons=seasons,
+                                 opponent=opponent)
         bt_cfg.value_col = value_col
         if verbose:
             print(f"\nbuilding boards ({value_col})...")
@@ -193,6 +242,7 @@ def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
             bt_cfg, board_builder=builder, weekly_actuals=weekly_actuals,
             output_dir=output_dir or (ROOT / "outputs" / "backtests"),
             label=f"{label}-{value_col}" if len(value_cols) > 1 else label,
+            opponent_provider=provider, verbose=verbose,
         )
     return out
 
@@ -209,12 +259,18 @@ def main() -> int:
     ap.add_argument("--value-col", default="vorp",
                     help="what the drafter ranks by: 'vorp' (the board) or "
                          "'adp_value' (pure market baseline)")
+    ap.add_argument("--opponent", default=None,
+                    choices=("gaussian", "league"),
+                    help="the field to draft against: 'gaussian' (ADP plus "
+                         "noise) or 'league' (fitted to this league's own "
+                         "drafts). Default: backtest.opponent_model.model")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     seasons = ([int(s) for s in args.seasons.split(",")]
                if args.seasons else None)
-    bt_cfg = backtest_config(cfg, drafts=args.drafts, seasons=seasons)
+    bt_cfg = backtest_config(cfg, drafts=args.drafts, seasons=seasons,
+                             opponent=args.opponent)
     bt_cfg.value_col = args.value_col
 
     folds = build_folds(bt_cfg)
@@ -224,14 +280,16 @@ def main() -> int:
         return 1
 
     print(f"walk-forward · seasons {bt_cfg.seasons} · purge gap "
-          f"{bt_cfg.purge_gap} · {bt_cfg.drafts_per_season} drafts/season")
+          f"{bt_cfg.purge_gap} · {bt_cfg.drafts_per_season} drafts/season "
+          f"· opponents {bt_cfg.opponent}")
     print(f"folds: " + ", ".join(
         f"{f.target_season}(train {f.train_seasons[0]}-{f.train_seasons[-1]})"
         for f in folds))
 
     summary = evaluate(cfg, value_cols=(args.value_col,), drafts=args.drafts,
                        seasons=seasons, label=args.label,
-                       refresh=args.refresh)[args.value_col]
+                       refresh=args.refresh,
+                       opponent=args.opponent)[args.value_col]
 
     per_fold = summary[summary["season"] != "ALL"]
     agg = summary[summary["season"] == "ALL"].iloc[0]

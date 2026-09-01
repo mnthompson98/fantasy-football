@@ -61,6 +61,13 @@ class BacktestConfig:
     })
     need_boost: float = 1.6
     need_penalty: float = 0.4
+    # Which field our side drafts against: "gaussian" (ADP plus noise, the model
+    # every recorded number was produced under) or "league" (fitted to this
+    # league's own drafts, `src/backtest/opponent_fit.py`). It belongs in the
+    # hash for the same reason `valuation` does: two runs that differ only in
+    # their opponents are not the same run, and a run record that cannot tell
+    # them apart is the bug CLAUDE.md names.
+    opponent: str = "gaussian"
     value_col: str = "vorp"
     min_train_seasons: int = 2
     # None = expanding window (every season up to the purge gap). An integer
@@ -80,10 +87,22 @@ class BacktestConfig:
     # exactly the failure CLAUDE.md calls a bug.
     valuation: dict | None = None
 
+    # Fields left out of the hash when they hold their default. A field added
+    # after a baseline was recorded would otherwise change every hash, including
+    # for runs configured exactly as that baseline was — which does not describe
+    # a different run, it describes the same run under a newer dataclass, and it
+    # would force re-recording a fixture whose numbers had not moved.
+    #
+    # Only defaults are exempt, and only for fields that did not exist when the
+    # fixture was recorded. `opponent="gaussian"` is the field the baseline was
+    # measured under; `opponent="league"` changes the hash, which is the point.
+    _HASH_OMIT_WHEN_DEFAULT = {"opponent": "gaussian"}
+
     def hash(self) -> str:
         payload = json.dumps(
             {k: (list(v) if isinstance(v, tuple) else v)
-             for k, v in self.__dict__.items()},
+             for k, v in self.__dict__.items()
+             if self._HASH_OMIT_WHEN_DEFAULT.get(k, object()) != v},
             sort_keys=True, default=str,
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:12]
@@ -133,14 +152,20 @@ def _git_commit() -> str:
 
 def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
              board_builder, weekly_actuals: pd.DataFrame,
-             historical_features: pd.DataFrame | None = None
-             ) -> list[M.BacktestResult]:
+             historical_features: pd.DataFrame | None = None,
+             opponent_factory=None) -> list[M.BacktestResult]:
     """Simulate and score one target season.
 
     `board_builder(fold, cfg) -> DataFrame` must return the as-of-draft-day
     board with columns `player_id, player_name, position, adp_rank, projection,
     vorp, season`. It is called inside the guard so a leaky board fails here
     rather than silently inflating results.
+
+    `opponent_factory` is the field this fold drafts against, already resolved
+    for this target season by `run_backtest` — an opponent model fitted to this
+    league must only see drafts held before the fold's target season, which is
+    why it is chosen per fold rather than once per run. `None` keeps the
+    gaussian field built from `cfg.sigma`.
     """
     if historical_features is not None:
         assert_no_future_seasons(
@@ -177,6 +202,7 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
             flex_eligible=cfg.flex_eligible, sigma=cfg.sigma,
             need_boost=cfg.need_boost, need_penalty=cfg.need_penalty,
             value_col=cfg.value_col, seed=seed, caps=cfg.caps,
+            opponent_factory=opponent_factory,
         )
 
         my_team = my_slot - 1
@@ -242,8 +268,15 @@ def run_backtest(cfg: BacktestConfig, *, board_builder,
                  weekly_actuals: pd.DataFrame,
                  historical_features: pd.DataFrame | None = None,
                  output_dir: Path | str = "outputs/backtests",
-                 label: str = "") -> pd.DataFrame:
-    """Full walk-forward run. Returns the per-fold summary and logs it."""
+                 label: str = "", opponent_provider=None,
+                 verbose: bool = False) -> pd.DataFrame:
+    """Full walk-forward run. Returns the per-fold summary and logs it.
+
+    `opponent_provider(fold, cfg) -> (factory, provenance)` chooses the field
+    per fold. The provenance string is printed and logged, because a fitted
+    field that silently fell back to priors would otherwise look exactly like
+    one that fitted successfully.
+    """
     folds = build_folds(cfg)
     if not folds:
         raise ValueError(
@@ -253,13 +286,21 @@ def run_backtest(cfg: BacktestConfig, *, board_builder,
 
     all_results: list[M.BacktestResult] = []
     per_fold_mean: list[float] = []
+    opponent_notes: list[str] = []
 
     for fold in folds:
+        factory, note = (opponent_provider(fold, cfg) if opponent_provider
+                         else (None, ""))
+        if note:
+            opponent_notes.append(f"{fold.target_season}: {note}")
+            if verbose:
+                print(f"  opponents {fold.target_season}: {note}")
         fold_results = run_fold(
             fold, cfg,
             board_builder=board_builder,
             weekly_actuals=weekly_actuals,
             historical_features=historical_features,
+            opponent_factory=factory,
         )
         all_results.extend(fold_results)
         per_fold_mean.append(
@@ -276,6 +317,8 @@ def run_backtest(cfg: BacktestConfig, *, board_builder,
     summary["run_at"] = datetime.now(timezone.utc).isoformat()
     summary["label"] = label
     summary["leakage_warning"] = warning or ""
+    summary["opponent"] = cfg.opponent
+    summary["opponent_fit"] = " | ".join(opponent_notes)
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)

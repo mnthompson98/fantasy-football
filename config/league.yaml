@@ -94,10 +94,29 @@ backtest:
   # future season needs discounting.
   downweight: []
 
-  # Opponent draft model: sample each opponent pick from a truncated normal
-  # centered on ADP rank. Sigma is calibrated per position from historical ADP
-  # error by `scripts/calibrate_adp_sigma.py`; these are the fallback priors.
+  # Which field the simulated drafter faces.
+  #
+  #   gaussian — each opponent pick sampled around ADP rank with gaussian noise
+  #              and a multiplicative positional-need factor. Every recorded
+  #              number in HANDOFF.md and in tests/fixtures/backtest_baseline.json
+  #              was produced under this, which is why it is still the default.
+  #   league   — fitted to this league's own drafts (2021 + 2025 under
+  #              data/league_history/) by src/backtest/opponent_fit.py. See
+  #              `python -m scripts.fit_opponent_model` for the measurement, and
+  #              HANDOFF.md "The opponent model" for what changing it costs.
+  #
+  # Swap with `--opponent league` on run_backtest or check_backtest_baseline
+  # rather than editing this, unless you are changing what ships.
   opponent_model:
+    model: gaussian
+
+    # --- gaussian only -------------------------------------------------
+    # Sigma priors for the gaussian field. Note the docstring these used to
+    # carry claimed they were "calibrated by scripts/calibrate_adp_sigma.py";
+    # that script has never existed in this repo. They are priors, and the
+    # league's own drafts say every one of them is too tight — measured sd of
+    # (pick_no - adp_rank) is RB 11.9, WR 15.4, DEF 19.3, TE 23.1, K 35.2,
+    # QB 47.3.
     adp_sigma_fallback:
       QB: 12.0
       RB: 10.0
@@ -107,6 +126,17 @@ backtest:
       DEF: 6.0
     positional_need_boost: 1.6   # multiplier when a starting slot is unfilled
     positional_need_penalty: 0.4 # multiplier when the position is already full
+
+    # --- league only ---------------------------------------------------
+    # Which of this league's drafts a fold may fit its field on.
+    #   prior — only drafts held strictly before the fold's target season.
+    #   all   — every draft, for the offline report where there is no fold.
+    fit_scope: prior
+    # Rounds added to a position's key once a roster already holds as many of
+    # it as a team in this league actually ends up holding. The run curve sets
+    # *when* a position goes; this stops one simulated manager taking three
+    # kickers in round 13 because kickers are cheap there.
+    over_ceiling_penalty: 8.0
 
 # Post-hoc calibration slopes. Projection spread is systematically too wide;
 # shrink toward the positional mean.
