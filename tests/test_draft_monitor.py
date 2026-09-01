@@ -658,6 +658,73 @@ def test_draft_state_uses_the_lookahead_not_the_on_the_clock_display_value():
         "lookahead is being fed the display value again")
 
 
+# --------------------------------------------------------------------------
+# The phone board: filter/search/hide state, and the missing recommendation
+# --------------------------------------------------------------------------
+
+def test_filter_search_and_hide_persist_across_the_auto_reload(board, tmp_path):
+    """`Hide taken` (and the position filter, and the search box) lived only
+    in a JS variable, so the page's own 6-second auto-refresh silently reset
+    all three every time — the toggle undid itself while you watched. Fixed
+    the same way the tap-to-strike marks already were: localStorage, saved on
+    every change and restored before the first render."""
+    path = refresh_html(board, tmp_path / "board.html", set())
+    html = path.read_text(encoding="utf-8")
+    assert "UI_KEY" in html and "'ui_state_v1'" in html
+    assert "saveUI()" in html
+    # Saved on every control, not just one of the three.
+    for handler in ("hide = !hide; e.target.classList.toggle('on', hide); saveUI();",
+                    "pos = b.dataset.p; saveUI();",
+                    "q = e.target.value.toLowerCase().trim(); saveUI();"):
+        assert handler in html, f"missing saveUI() call: {handler}"
+    # Restored state has to reach the controls themselves, not just the
+    # filtering logic, or the buttons would show the wrong thing was active.
+    assert "document.getElementById('q').value = q;" in html
+    assert "classList.toggle('on', hide)" in html
+    assert "b.dataset.p === pos" in html
+
+
+def test_the_live_board_shows_the_suggested_pick_and_why(board, tmp_path):
+    """The phone was the one device you actually draft from, and it was just
+    a searchable table -- the recommendation and its reasoning existed only
+    in the terminal. `refresh_html` now carries both onto the page itself."""
+    rec = board.iloc[0]
+    path = refresh_html(board, tmp_path / "board.html", set(),
+                        recommendation=rec, reason="Because reasons.")
+    html = path.read_text(encoding="utf-8")
+    assert "Suggested pick" in html
+    assert str(rec["player_name"]) in html
+    assert "Because reasons." in html
+
+
+def test_no_recommendation_means_no_banner(board, tmp_path):
+    path = refresh_html(board, tmp_path / "board.html", set())
+    assert "Suggested pick" not in path.read_text(encoding="utf-8")
+
+
+def test_explain_prefers_urgency_when_the_position_is_about_to_run_out():
+    """Mirrors the real diagnosis: WR Top (best ADP, will not survive) should
+    read as urgent; QB Top (deep, unthreatened bench behind him) should not.
+    Reuses `_lookahead_bug_fixture()` rather than a fresh board, because
+    getting this right requires care -- QB Top's own ADP has to place him
+    *outside* the dropped-by-ADP window so his own survival, not a second
+    good QB, is what produces zero urgency."""
+    from src.backtest.draft_sim import Roster, ValueDrafter
+    from src.draft.monitor import explain
+
+    avail = _lookahead_bug_fixture()
+    roster = Roster(team_id=0, starters={"QB": 1, "WR": 2}, flex_slots=0,
+                    flex_eligible=(), bench_slots=12)
+    d = ValueDrafter(caps={"QB": 1})
+
+    wr_top = avail[avail.player_id == "wr_top"].iloc[0]
+    qb_top = avail[avail.player_id == "qb_top"].iloc[0]
+    urgent = explain(d, roster, avail, wr_top, lookahead=6)
+    patient = explain(d, roster, avail, qb_top, lookahead=6)
+    assert "won't last" in urgent.lower()
+    assert "not urgent" in patient.lower()
+
+
 def test_no_configured_draft_id_defaults_to_the_safe_path():
     """Cannot verify this is the real draft -> treat it as not the real draft.
     Being wrong in this direction costs a --html flag; being wrong the other

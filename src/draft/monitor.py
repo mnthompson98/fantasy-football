@@ -51,7 +51,7 @@ CONFIG = ROOT / "config" / "league.yaml"
 # it from here. The implementation is the simulator's, so the live monitor and
 # the backtest can never disagree about whose turn it is.
 __all__ = ["picks_until_next_turn", "draft_state", "render", "run", "DraftState",
-           "scoring_mismatch", "default_html_path"]
+           "scoring_mismatch", "default_html_path", "explain"]
 
 # Sleeper's own vocabulary for a draft's scoring format, from `draft.metadata`.
 # This is frequently the *only* place a mock draft (`league_id: null`, no
@@ -80,6 +80,7 @@ class DraftState:
     roster: Roster
     runs: dict[str, float] = field(default_factory=dict)
     recommendation: pd.Series | None = None
+    reason: str | None = None
     complete: bool = False
 
 
@@ -130,6 +131,42 @@ def _roster_for(picks: list[dict], my_slot: int, board: pd.DataFrame,
             entry["replacement_points"] = float(row.get("replacement_points") or 0.0)
         roster.picks.append(entry)
     return roster
+
+
+def explain(drafter: ValueDrafter, roster: Roster, available: pd.DataFrame,
+           recommendation: pd.Series, lookahead: int) -> str:
+    """One plain-English line for why this is the pick.
+
+    Re-runs the same position-vs-survivor comparison `choose()` made
+    internally to reach this player, rather than inventing a separate
+    explanation that could drift from the actual decision. `_effective` is
+    `ValueDrafter`'s own points-scale conversion (VORP + replacement_points);
+    reaching into it here is deliberate, the same way this whole module
+    imports `Roster`/`ValueDrafter` directly rather than keeping a second copy
+    of the logic that could disagree with it.
+    """
+    pos = str(recommendation["position"])
+    try:
+        now_val = drafter._effective(recommendation)
+        later_pool = drafter.survivors(available, lookahead)
+        later_pool = later_pool[later_pool["position"] == pos]
+        if later_pool.empty:
+            return (f"Best {pos} left on the board — nobody else at the "
+                    f"position is projected to still be here by your next turn.")
+        later_idx = int(later_pool["vorp"].idxmax())
+        later_name = str(later_pool.at[later_idx, "player_name"])
+        later_val = drafter._effective(later_pool.loc[later_idx])
+        gain = (drafter.marginal_value(roster, pos, now_val)
+               - drafter.marginal_value(roster, pos, later_val))
+    except (KeyError, ValueError, ZeroDivisionError):
+        return ""
+
+    if gain > 1.0:
+        return (f"Won't last: {later_name} is the next-best {pos} likely "
+                f"still there at your next turn, {gain:.0f} fewer points to "
+                f"your lineup. Waiting costs you that gap.")
+    return (f"Best value here, but not urgent — {pos} depth holds up, so "
+           f"this is about who's on the board, not a race against the clock.")
 
 
 def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
@@ -196,6 +233,8 @@ def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
             idx = drafter.choose(available, roster, rounds, picks_remaining,
                                  lookahead)
             state.recommendation = available.loc[idx]
+            state.reason = explain(drafter, roster, available,
+                                   state.recommendation, lookahead)
         except (ValueError, KeyError):
             # A recommendation is a nicety; the board is the deliverable. Never
             # let a policy edge case take the monitor down mid-draft.
@@ -298,6 +337,8 @@ def render(state: DraftState, *, top_n: int = 8,
     if state.recommendation is not None:
         out.append("")
         out.append(f"  >> TAKE: {_line(state.recommendation)}")
+        if state.reason:
+            out.append(f"     why:  {state.reason}")
 
     out.append("")
     out.append("  best available (cap-adjusted):")
@@ -408,7 +449,9 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
             if html_path:
                 try:
                     refresh_html(board, html_path, state.drafted,
-                                 meta={"picks": f"{state.made}/{state.total}"})
+                                 meta={"picks": f"{state.made}/{state.total}"},
+                                 recommendation=state.recommendation,
+                                 reason=state.reason)
                 except OSError as exc:
                     print(f"  [warn] could not rewrite {html_path}: {exc}")
             if state.complete:

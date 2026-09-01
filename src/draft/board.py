@@ -158,7 +158,8 @@ def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
 
 
 def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
-                 *, meta: dict | None = None) -> Path:
+                 *, meta: dict | None = None,
+                 recommendation=None, reason: str | None = None) -> Path:
     """Rewrite the phone board with the live draft's picks struck through.
 
     The HTML shipped as a tap-to-strike sheet backed by localStorage, which is
@@ -171,16 +172,23 @@ def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
     — they are how you mark a player you have decided against — but they are now
     a *union* with the feed, not the only source. A player the feed says is gone
     cannot be un-struck by tapping, because he is gone.
+
+    `recommendation`/`reason` are the same values the terminal prints as
+    `>> TAKE:` / `why:`. Without them the phone board was just a sortable
+    table — on the one device you are actually drafting from, the thing that
+    tells you what to do was terminal-only.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_render_html(board, meta or {}, drafted=drafted),
+    path.write_text(_render_html(board, meta or {}, drafted=drafted,
+                                 recommendation=recommendation, reason=reason),
                     encoding="utf-8")
     return path
 
 
 def _render_html(board: pd.DataFrame, meta: dict,
-                 *, drafted: set | None = None) -> str:
+                 *, drafted: set | None = None,
+                 recommendation=None, reason: str | None = None) -> str:
     """Self-contained, phone-readable board with position filtering and search."""
     records = board.fillna("").to_dict(orient="records")
     payload = json.dumps(records)
@@ -200,6 +208,35 @@ def _render_html(board: pd.DataFrame, meta: dict,
     # cost against actually seeing who is still on the board.
     refresh_tag = ('<meta http-equiv="refresh" content="6">'
                    if drafted is not None else "")
+
+    rec_html = ""
+    if recommendation is not None:
+        pos = str(recommendation.get("position", ""))
+        name = str(recommendation.get("player_name", ""))
+        vorp = recommendation.get("vorp")
+        adp = recommendation.get("adp_rank")
+        delta = recommendation.get("adp_delta")
+        try:
+            vorp_s = f"{float(vorp):.1f}"
+        except (TypeError, ValueError):
+            vorp_s = "—"
+        try:
+            adp_s = f"ADP {int(float(adp))}"
+        except (TypeError, ValueError):
+            adp_s = ""
+        try:
+            d = int(float(delta))
+            adp_s += f" ({d:+d})" if adp_s else f"{d:+d}"
+        except (TypeError, ValueError):
+            pass
+        reason_html = f'<div class="rec-why">{reason}</div>' if reason else ""
+        rec_html = f"""
+  <div class="rec">
+    <div class="rec-label">Suggested pick</div>
+    <div class="rec-player"><span class="pos {pos}">{pos}</span> {name}</div>
+    <div class="rec-stats">VORP {vorp_s}{" · " + adp_s if adp_s else ""}</div>
+    {reason_html}
+  </div>"""
 
     return f"""<!doctype html>
 <html lang="en"><head>
@@ -255,6 +292,16 @@ def _render_html(board: pd.DataFrame, meta: dict,
      "Questionable" is paperwork, so it stays grey and does not shout. */
   .inj.soft{{color:var(--muted);font-weight:400}}
   .hint{{padding:10px 16px;color:var(--muted);font-size:12px}}
+  /* The one thing that was missing from the phone board entirely: what to
+     actually do. The terminal always had this; the device you draft from
+     did not. */
+  .rec{{margin-top:10px;padding:10px 12px;border:1px solid var(--fg);
+    border-radius:10px;background:var(--card)}}
+  .rec-label{{font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);font-weight:700}}
+  .rec-player{{font-size:17px;font-weight:700;margin:2px 0}}
+  .rec-stats{{font-size:12px;color:var(--muted)}}
+  .rec-why{{font-size:12.5px;color:var(--fg);margin-top:4px;line-height:1.4}}
   /* On a phone the projection column is the first thing to go: VORP already
      carries it, and ADP and the delta are what you actually compare. */
   @media (max-width:430px) {{
@@ -264,7 +311,7 @@ def _render_html(board: pd.DataFrame, meta: dict,
 </style></head><body>
 <header>
   <h1>Draft Board</h1>
-  <div class="sub">{subtitle} · generated {generated}</div>
+  <div class="sub">{subtitle} · generated {generated}</div>{rec_html}
   <div class="controls">
     <input id="q" placeholder="Search player…" autocomplete="off">
     <button data-p="ALL" class="on">All</button>
@@ -290,11 +337,26 @@ const DRAFTED = new Set({drafted_payload});
 const KEY = 'drafted_v1';
 let taps = new Set();
 try {{ taps = new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); }} catch (e) {{}}
+
+// Position filter, search text and the hide-taken toggle used to live only in
+// memory, so the page's own auto-refresh (every 6s, so struck-out picks stay
+// current) silently reset all three on every reload — "Hide taken" undid
+// itself every six seconds. Persisted the same way the taps already were.
+const UI_KEY = 'ui_state_v1';
 let pos = 'ALL', q = '', hide = false;
+try {{
+  const ui = JSON.parse(localStorage.getItem(UI_KEY) || '{{}}');
+  if (typeof ui.pos === 'string') pos = ui.pos;
+  if (typeof ui.q === 'string') q = ui.q;
+  if (typeof ui.hide === 'boolean') hide = ui.hide;
+}} catch (e) {{}}
 
 const isTaken = id => DRAFTED.has(id) || taps.has(id);
 function save() {{
   try {{ localStorage.setItem(KEY, JSON.stringify([...taps])); }} catch (e) {{}}
+}}
+function saveUI() {{
+  try {{ localStorage.setItem(UI_KEY, JSON.stringify({{pos, q, hide}})); }} catch (e) {{}}
 }}
 function num(v, d) {{
   return (v === '' || v === null || v === undefined || isNaN(v))
@@ -356,16 +418,27 @@ document.getElementById('tb').addEventListener('click', e => {{
   save(); render();
 }});
 document.getElementById('hide').onclick = e => {{
-  hide = !hide; e.target.classList.toggle('on', hide); render();
+  hide = !hide; e.target.classList.toggle('on', hide); saveUI(); render();
 }};
 document.querySelectorAll('button[data-p]').forEach(b => {{
   b.onclick = () => {{
     document.querySelectorAll('button[data-p]').forEach(x => x.classList.remove('on'));
-    b.classList.add('on'); pos = b.dataset.p; render();
+    b.classList.add('on'); pos = b.dataset.p; saveUI(); render();
   }};
 }});
 document.getElementById('q').addEventListener('input', e => {{
-  q = e.target.value.toLowerCase().trim(); render();
+  q = e.target.value.toLowerCase().trim(); saveUI(); render();
 }});
+
+// Reflect the restored filter/search/hide state into the controls themselves
+// before the first render — otherwise the *filtering* would persist correctly
+// but the buttons and search box would silently disagree with what the page
+// is actually showing.
+document.getElementById('q').value = q;
+document.getElementById('hide').classList.toggle('on', hide);
+document.querySelectorAll('button[data-p]').forEach(b => {{
+  b.classList.toggle('on', b.dataset.p === pos);
+}});
+
 render();
 </script></body></html>"""
