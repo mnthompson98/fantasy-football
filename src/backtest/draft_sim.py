@@ -146,6 +146,52 @@ class OpponentModel:
         return int(available.index[int(np.argmin(key))])
 
 
+# Above this, a position is genuinely being raided and waiting costs real
+# points, worth calling out loudly. Below it, the wording should read as
+# "fine, no rush" rather than manufacturing urgency out of a rounding error.
+_URGENT_GAIN = 1.0
+_BIG_GAIN = 15.0
+
+
+def _drop_off_reason(position: str, gain: float, later_name: str | None,
+                     picks_until_next: int) -> str:
+    """Plain English for one candidate's `gain`, specific enough to actually
+    differ pick to pick — the name, the point gap and the turn count are
+    real numbers pulled from this decision, not a fixed two-template phrase.
+    """
+    if gain > _URGENT_GAIN:
+        tier = "Big drop-off" if gain > _BIG_GAIN else "Real gap"
+        survivor = f"{later_name} looks like the best {position} still around" \
+            if later_name else f"nothing else at {position} is left"
+        return (f"{tier}: {survivor} in {picks_until_next} picks — "
+               f"{gain:.0f} fewer points to your lineup if you wait.")
+    if later_name:
+        return (f"No rush — {later_name} projects to survive to your next "
+               f"turn nearly as well, so this is about who's best, not a "
+               f"race against the clock.")
+    return (f"No rush — {position} depth holds up through your next turn, "
+           f"so this is about who's best, not a race against the clock.")
+
+
+@dataclass
+class Candidate:
+    """One position's best available player, and why it ranked where it did.
+
+    `gain` and `raw_value` are exactly what `ValueDrafter.rank()` sorts by —
+    carried through so a caller can see the numbers behind the reasoning,
+    not just the sentence.
+    """
+
+    index: int
+    position: str
+    player_name: str
+    gain: float          # drop-off vs. the likely survivor; inf = forced pick
+    value: float          # points-scale (VORP + replacement_points)
+    raw_value: float      # the board's own value_col (e.g. anchored VORP)
+    reason: str
+    forced: bool = False  # scarcity / end-of-draft backstop, not a real choice
+
+
 class ValueDrafter:
     """Our side: take the pick that most improves our *starting lineup*.
 
@@ -288,6 +334,28 @@ class ValueDrafter:
     def choose(self, available: pd.DataFrame, roster: Roster,
                roster_size: int, picks_remaining: int,
                picks_until_next: int = 0) -> int:
+        """The single pick. A thin wrapper: `rank()` does the actual work and
+        this returns its winner, so the two can never disagree with each
+        other. Kept because every call site outside this module — the
+        backtest, the live monitor's fallback, every existing test — wants
+        just the index, not the full breakdown.
+        """
+        return self.rank(available, roster, roster_size, picks_remaining,
+                         picks_until_next)[0].index
+
+    def rank(self, available: pd.DataFrame, roster: Roster,
+            roster_size: int, picks_remaining: int,
+            picks_until_next: int = 0, *, top_n: int | None = None
+            ) -> list["Candidate"]:
+        """Every legal position's best player, ranked the same way `choose()`
+        picks its winner — best first, each with why it landed where it did.
+
+        This exists so a caller can show the runner-up and why it lost, not
+        only the winner. `choose()` is exactly `self.rank(...)[0].index`; the
+        selection logic below is unchanged from what it always was, only
+        returning the full ordering instead of discarding everything but the
+        top.
+        """
         df = available
         counts = roster.counts()
 
@@ -310,6 +378,8 @@ class ValueDrafter:
         # 2. Scarcity backstop. If a position we still need a starter at is
         #    nearly exhausted, take the best one now regardless of VORP —
         #    a replacement-level starter beats an empty slot by its whole score.
+        #    This is a forced pick, not a comparison, so there is nothing
+        #    meaningful to rank it against — the list is one long.
         dedicated_need = [
             p for p, n in roster.unfilled_dedicated_slots().items() if n > 0
         ]
@@ -322,7 +392,20 @@ class ValueDrafter:
             if scarce:
                 forced = df[df["position"].isin(scarce)]
                 if not forced.empty:
-                    return int(forced[self.value_col].idxmax())
+                    idx = int(forced[self.value_col].idxmax())
+                    pos = str(forced.at[idx, "position"])
+                    left = int(supply.get(pos, 0))
+                    return [Candidate(
+                        index=idx, position=pos,
+                        player_name=str(forced.at[idx, "player_name"]),
+                        gain=float("inf"), value=self._effective(forced.loc[idx]),
+                        raw_value=float(forced.at[idx, self.value_col]),
+                        forced=True,
+                        reason=(f"Only {left} {pos}{'s' if left != 1 else ''} left "
+                               f"and the starting slot is still open — taking "
+                               f"the best one now rather than risking an empty "
+                               f"slot later."),
+                    )]
 
         # 3. End-of-draft backstop. Counted once per slot — never sum the
         #    per-position need dict, which triple-counts the flex.
@@ -362,34 +445,51 @@ class ValueDrafter:
         #    player.
         left = self.survivors(df, picks_until_next)
 
-        best_idx = None
-        best_key = None
+        candidates: list[Candidate] = []
         for pos, group in df.groupby("position", sort=False):
             pos = str(pos)
             idx = int(group[self.value_col].idxmax())
             now = self._effective(df.loc[idx])
 
             later_pool = left[left["position"] == pos]
-            m_now = self.marginal_value(roster, pos, now)
-            gain = m_now
+            later_name = None
+            gain = self.marginal_value(roster, pos, now)
             if not later_pool.empty:
                 later_idx = int(later_pool[self.value_col].idxmax())
+                later_name = str(later_pool.at[later_idx, "player_name"])
                 gain -= self.marginal_value(
                     roster, pos, self._effective(later_pool.loc[later_idx]))
 
-            # Ties break on *anchored* VORP, not on lineup contribution. Using
-            # the lineup contribution here rewards filling any empty slot, and
-            # once the skill positions are set that means drafting a kicker and
-            # a defense in rounds 8 and 9 — undoing the market anchor, which
-            # exists precisely to keep them out of the early rounds. Anchored
-            # VORP already prices them below every bench body, so the tie
-            # resolves the way it should and the end-of-draft backstop picks
-            # them up.
-            key = (gain, float(df.at[idx, self.value_col]))
-            if best_key is None or key > best_key:
-                best_key, best_idx = key, idx
+            candidates.append(Candidate(
+                index=idx, position=pos,
+                player_name=str(df.at[idx, "player_name"]),
+                gain=gain, value=now,
+                raw_value=float(df.at[idx, self.value_col]),
+                reason=_drop_off_reason(pos, gain, later_name, picks_until_next),
+            ))
 
-        return best_idx if best_idx is not None else int(df[self.value_col].idxmax())
+        if not candidates:
+            idx = int(df[self.value_col].idxmax())
+            return [Candidate(
+                index=idx, position=str(df.at[idx, "position"]),
+                player_name=str(df.at[idx, "player_name"]), gain=0.0,
+                value=self._effective(df.loc[idx]),
+                raw_value=float(df.at[idx, self.value_col]),
+                reason="Best value left on the board.",
+            )]
+
+        # Ties break on *anchored* VORP (`raw_value`), not on lineup
+        # contribution. Sorting on lineup contribution rewards filling any
+        # empty slot, and once the skill positions are set that means
+        # drafting a kicker and a defense in rounds 8 and 9 — undoing the
+        # market anchor, which exists precisely to keep them out of the early
+        # rounds. Anchored VORP already prices them below every bench body,
+        # so the tie resolves the way it should and the end-of-draft backstop
+        # picks them up. `sorted` is stable, so a genuine tie keeps whichever
+        # position `groupby` visited first — matching the manual max-loop
+        # this replaced, which only overwrote its best-so-far on a strict `>`.
+        candidates.sort(key=lambda c: (c.gain, c.raw_value), reverse=True)
+        return candidates[:top_n] if top_n else candidates
 
 
 def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,

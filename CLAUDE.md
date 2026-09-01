@@ -256,6 +256,35 @@ depend on these. The league payload also carries a vestigial
   drafted who is not on the board still counts against your caps — dropping him
   silently raises them.
 
+- **The live monitor had a second, worse bug than the one above, found only by
+  actually drafting with it.** `draft_state()` computed one number, "picks
+  until your turn," for two jobs. As a *display* value it is correctly 0 the
+  instant you are on the clock. That same 0 was then fed straight into
+  `ValueDrafter.choose()` as its lookahead. `choose()` treats a lookahead
+  `<= 0` as "nobody else picks before I do again" and returns the pool
+  unfiltered, so every position's drop-off computed to exactly zero and the
+  tiebreak fell back to raw VORP — resurrecting the "backup QB by raw VORP"
+  bug from the line above, in live play, on every single on-the-clock
+  recommendation, which is every time it mattered. `simulate_draft` was never
+  affected: it always computes the lookahead from the pick *being decided*
+  (`picks_until_next_turn(pick_no, ...)`), never from picks already completed.
+  Fixed by computing a second value, `lookahead = picks_until_next_turn(made +
+  1, ...)`, matching what the backtest already does. Two regression tests in
+  `tests/test_draft_monitor.py` force the display value and the correct
+  lookahead to disagree and assert the recommendation follows the correct one.
+
+- **`ValueDrafter.rank()` exposes the runner-up, not just the winner, without
+  touching what actually gets picked.** `choose()` is now `rank(...)[0].index`
+  — a pure extraction, verified by `test_choose_is_exactly_ranks_winner` and by
+  the parity baseline (`tests/fixtures/backtest_baseline.json`), which
+  fingerprints `draft_sim.py` and fails if the picked ordering moves. The
+  reasoning text (`Candidate.reason`) is built from the same drop-off
+  comparison `choose()` already made — never a second, separately-maintained
+  explanation that could drift from the real decision. A forced pick
+  (scarcity / end-of-draft backstop) returns a single flagged `Candidate`;
+  there is no real alternative to show there, only the reason there wasn't
+  one.
+
 - **The board and the backtest share one valuation pipeline.**
   `src/features/pipeline.py` is called by both `scripts/build_draft_board.py`
   and `scripts/run_backtest.py`. If they diverge, the backtest is scoring a

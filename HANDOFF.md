@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-08-31
 **Repo:** https://github.com/mnthompson98/fantasy-football
-**Branch:** main · **Tests:** 196 passing + 1 gated skip, Python 3.14
+**Branch:** main · **Tests:** 219 passing + 1 gated skip, Python 3.14
 **2026 league:** `Camden?` · league `1389723592727461888` · draft `1389723592727461889`
 10 teams · 16 rounds · snake · status `pre_draft`
 
@@ -57,7 +57,7 @@ first accented player name.
 
 ## State: what is built
 
-All of it tested; 196 unit tests.
+All of it tested; 219 unit tests.
 
 **Ingest** — `sleeper_api` (read-only client, standings/bracket resolution),
 `nflverse` (cached pulls, season-aware freshness), `player_ids` (gsis-anchored
@@ -71,8 +71,11 @@ crosswalk), `history` (season-parameterized history + preseason ECR),
 
 **Backtest** — `walkforward`, `draft_sim`, `metrics`, `leakage_guard`.
 
-**Draft** — `board` (parquet/CSV/HTML + live rewrite), `monitor` (live Sleeper
-poll; runs the simulator's own pick policy, not a second copy).
+**Draft** — `board` (parquet/CSV/HTML, live rewrite, auto-reloading phone board
+with persisted filters and a baked-in recommendation), `monitor` (live Sleeper
+poll; runs the simulator's own `ValueDrafter.rank()` for the pick *and* a
+couple of ranked alternatives with individual reasoning — not a second copy of
+the policy, and not just the winner).
 
 **In-season** — `projections`, `roster`, `start_sit`, `waivers`, `trades`,
 `matchup`, `report`.
@@ -92,43 +95,70 @@ Rebuilt against the live 2026 league. 515 of 517 ranked players reconcile; the
 two misses are ECR 294 and 306. Nine players gated out by injury status, Josh
 Jacobs (DNR, ECR 45) the notable one.
 
-### The live draft path was broken in eight ways, and now is not
+### The live draft path was broken in nine ways. Now it has been run live
+### three times, clean, and is what will run Thursday.
 
-It had no tests at all. Driving it against this league's real 2025 and 2021
-Sleeper feeds found the following, in rough order of what each would have cost:
+It had no tests at all when this started. Driving it first against replays,
+then against three real, in-progress Sleeper mock drafts, found the following.
 
-| What | Effect on draft day |
-|---|---|
-| Recommended by **raw VORP**, ignoring your roster and the caps | The whole documented edge — drop-off valuation, roster-aware marginal value, position caps — ran only inside the backtest. Late rounds offered a backup QB. |
-| `picks_until_next_turn` looped forever on an out-of-range `--my-slot` | Monitor hangs, silently, with no output at all |
-| Printed nothing until pick 1 landed | From slot 1 you are on the clock for pick 1 staring at a blank terminal |
-| Pick counter was one behind | "pick 3/160 · YOU ARE ON THE CLOCK" while making pick 4 |
-| Detection keyed on `len(picks)` | An undo + replace between two polls is invisible; the wrong player stays struck off for the rest of the draft |
-| Phone board only reflected picks **you tapped** | Nine other managers were invisible on the artifact you actually draft from |
+| What | Effect on draft day | Found by |
+|---|---|---|
+| Recommended by **raw VORP**, ignoring your roster and the caps | Whole documented edge ran only inside the backtest. Backup QB offered late. | Replay |
+| `picks_until_next_turn` looped forever on a bad `--my-slot` | Monitor hangs, silently, no output at all | Replay |
+| Printed nothing until pick 1 landed | Blank terminal while on the clock for pick 1 | Replay |
+| Pick counter was one behind | "pick 3/160 · ON THE CLOCK" while making pick 4 | Replay |
+| Detection keyed on `len(picks)` | An undo+replace between polls is invisible | Replay |
+| Phone board only reflected picks **you tapped** | Nine other managers invisible on the artifact you draft from | Replay |
+| **The on-the-clock lookahead was 0, always** | Every live recommendation silently fell back to raw VORP — the first bug, resurrected, only while it actually mattered. Josh Allen recommended round 2 of a 1-QB league. | **Live mock #2** |
+| `--html` defaulted to the real board regardless of `--draft-id` | A mock's picks overwrote `draft_board.html`, the actual draft-day file | Live mock #1 |
+| No warning on a scoring mismatch | A full-PPR board misprices every reception in a standard room, silently | Live mock #1 |
 
-Plus two smaller ones: a "run in progress: WR 100%" warning that fired off a
-single pick every draft, and a countdown that kept promising turns after your
-last pick.
+Plus smaller ones: output block-buffered when redirected (looked like a hang
+for 15 picks), a positional-run warning that fired off one pick, a countdown
+that kept promising turns after your last pick, and — found by you, live,
+mock #3 — the phone board's filter/search/hide state reset on every 6-second
+auto-refresh, and the board carried no recommendation at all, only the
+terminal did.
 
-**What changed.** `monitor.py` now imports `Roster`, `ValueDrafter` and
-`picks_until_next_turn` from the simulator rather than owning copies, so the
-live tool and the backtest cannot disagree about the policy or whose turn it is.
-It rebuilds your roster from the feed's `draft_slot`, prints the pick the policy
-would make, marks capped positions, and rewrites the phone board with every
-drafted player struck through — the union of the live feed and your own taps,
-where a player the feed says is gone cannot be un-tapped. It cross-checks
-`--my-slot` against Sleeper's `draft_order` and refuses to start on a mismatch.
+**The lookahead bug is the one to understand.** `draft_state()` used one
+number, "picks until your turn" (correctly 0 the instant you're up), as the
+*drafter's* lookahead too. A lookahead `<= 0` makes `ValueDrafter` treat the
+whole remaining pool as "still there next turn," zeroing every position's
+drop-off and falling back to raw VORP — silently, only while a recommendation
+was live, i.e. every pick that mattered. The backtest was never affected: it
+always computes the lookahead from the pick *being decided*, never from picks
+already completed. Fixed and pinned by two regression tests engineered so the
+display value and the correct lookahead are forced to disagree.
 
-**How it is held.** `tests/test_draft_monitor.py` — 23 tests, each pinned to one
-of the above, driven off `tests/fixtures/sleeper_draft_picks_2025.json`, the
-genuine 160-pick payload from this league's 2025 draft trimmed to the fields the
-monitor reads. Synthetic picks would not have caught the parts that depend on
-Sleeper's own shape: `draft_slot`, string player ids, defenses keyed by team
-abbreviation rather than a numeric id.
+**What changed, in total.** `monitor.py` imports `Roster`, `ValueDrafter` and
+`picks_until_next_turn` from the simulator, never reimplementing them. It
+rebuilds your roster from the feed's `draft_slot`, computes the *correct*
+lookahead for the pick being decided, prints the pick plus a couple of
+runners-up (`ValueDrafter.rank()`, not just `choose()`) each with its own
+plain-English reasoning, rewrites the phone board with every drafted player
+struck through and the same recommendation-plus-alternatives baked into the
+page, and auto-reloads that page every 6s with the filter/search/hide state
+persisted across the reload. It cross-checks `--my-slot` against Sleeper's
+`draft_order`, refuses on a mismatch, warns loudly and continuously on a
+scoring-format mismatch, and only ever writes to the real `draft_board.html`
+when `--draft-id` matches `config.current.draft_id` — anything else gets a
+sibling `*.mock.html` so a practice draft cannot overwrite the real artifact.
 
-**What is still not proven.** Every replay feeds a *completed* draft. A live
-draft can do things a replay cannot: a pick landing mid-poll, an autopick, a
-commissioner undo. Run one real mock — step 1 under "Before the draft".
+**How it is held.** `tests/test_draft_monitor.py` and `tests/test_draft_policy.py`
+— 60+ tests between them, each pinned to one specific thing that broke,
+including the lookahead bug reproduced from first principles (a fixture where
+the display value and the correct lookahead are engineered to disagree) and an
+exact equivalence check (`choose() == rank()[0].index`) guarding the refactor
+that exposed alternatives. `tests/fixtures/sleeper_draft_picks_2025.json` is
+this league's genuine 160-pick payload, trimmed to the fields the monitor
+reads — synthetic picks would not catch what depends on Sleeper's own shape.
+
+**What is proven now.** Three full, real, in-progress Sleeper mock drafts,
+start to finish, 150-160 picks each, across two different room configurations
+(one deliberately mismatched — standard scoring — to prove the warning fires;
+one matching Thursday's settings almost exactly). The real `draft_board.html`
+was checked byte-identical before and after all three. Every defect found live
+is fixed and has a regression test.
 
 ### But the valuation is not demonstrably better than ADP
 
@@ -187,19 +217,19 @@ projection quality.
 
 ### Before the draft
 
-1. **Run one real Sleeper mock with the monitor attached.** The live path is no
-   longer untested — see "The live draft path" below — but everything that
-   validated it replays a *completed* draft, so nothing has yet exercised a
-   draft that is genuinely in progress: a pick landing while we poll, an
-   autopick, a commissioner undo. Start a mock in the Sleeper app, take its
-   `draft_id` from the URL, and run the monitor against it for the full sixteen
-   rounds. Point `--html` somewhere disposable so the mock's picks do not end up
-   struck through on the real phone board.
+1. ✅ **Three real Sleeper mocks run with the monitor attached**, start to
+   finish — see "The live draft path" above. Found and fixed a critical bug no
+   replay could have caught. Nothing further to prove here.
 2. **Get your draft slot** once the order is drawn; the monitor needs it. It
    cross-checks the flag against Sleeper's `draft_order` and refuses to start on
    a mismatch, so this is now a hard error rather than a silent wrong roster.
 3. **Rebuild the board that morning** with `--refresh`. ECR is the perishable
    input.
+4. **Do not pass `--html`.** The default now does the right thing on its own:
+   `--draft-id 1389723592727461889` matches `config.current.draft_id`, so it
+   writes straight to the real `draft_board.html` — the file to have open on
+   your phone. Passing `--draft-id` for anything else (another mock, a typo)
+   automatically redirects to a sibling `*.mock.html` instead.
 
 ### After the draft
 

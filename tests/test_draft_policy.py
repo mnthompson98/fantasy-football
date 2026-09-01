@@ -318,3 +318,95 @@ def test_waiver_level_is_the_tier_below_what_the_league_rosters():
 def test_waiver_level_is_zero_when_the_pool_is_exhausted():
     week = _week([("QB", 20.0)])
     assert waiver_levels(week, {"QB": 1}, teams=10)["QB"] == 0.0
+
+
+# --------------------------------------------------------------------------
+# rank() — the full ordering behind choose(), for callers who want to show
+# alternatives rather than only the winner
+# --------------------------------------------------------------------------
+
+def _filler(n: int, start_adp: int = 300):
+    return [(f"Filler {i}", "WR", -60.0 - i, start_adp + i) for i in range(n)]
+
+
+def test_choose_is_exactly_ranks_winner():
+    """The load-bearing guarantee: `rank()` must never let `choose()`'s actual
+    pick drift. Every backtest conclusion in this project depends on
+    `choose()`'s selection being unchanged by this refactor -- checked here
+    directly, and re-checked by the walk-forward parity baseline, which
+    fingerprints this file and fails if the picked ordering moves at all."""
+    roster = _roster([("WR", 92.0), ("WR", 50.0), ("WR", 30.0),
+                      ("TE", 30.0), ("QB", 85.0)])
+    pool = _pool([
+        ("Backup QB", "QB", 41.0, 74),
+        ("Some RB", "RB", 2.0, 64),
+        ("Bench WR", "WR", 3.0, 70),
+    ] + _filler(12))
+    d = ValueDrafter()
+    chosen = d.choose(pool, roster, 16, 11, picks_until_next=8)
+    ranked = d.rank(pool, roster, 16, 11, picks_until_next=8)
+    assert chosen == ranked[0].index
+
+
+def _rank_test_pool():
+    """RB, TE, K and DEF are all `dedicated_need` for the roster these tests
+    use, so *each* needs more than `SCARCITY_FLOOR` (3) bodies or the
+    scarcity backstop preempts the drop-off comparison this fixture exists to
+    exercise -- exactly the trap `test_a_kicker_does_not_jump_the_queue...`
+    already warns about above.
+
+    ADP is arranged so that with `picks_until_next=5`, the five lowest-ADP
+    rows -- Scarce RB, Weak RB, Good TE and both RB Extras -- are exactly the
+    ones `survivors()` drops. That takes every RB candidate off the board
+    (urgent: "nothing left") while leaving Also TE, a near-equal second tight
+    end, in place (not urgent: the gap is genuinely small).
+    """
+    return _pool([
+        ("Scarce RB", "RB", 40.0, 5),
+        ("Weak RB", "RB", -30.0, 6),
+        ("Good TE", "TE", 40.0, 7),
+        ("RB Extra 1", "RB", -35.0, 8),
+        ("RB Extra 2", "RB", -36.0, 9),
+        ("Also TE", "TE", 39.0, 150),       # survives the drop; near-tie value
+        ("TE Extra 1", "TE", -20.0, 160),
+        ("TE Extra 2", "TE", -21.0, 161),
+    ] + [(f"K {i}", "K", -40.0 - i, 300 + i) for i in range(4)]
+      + [(f"DEF {i}", "DEF", -45.0 - i, 310 + i) for i in range(4)]
+      + _filler(6))
+
+
+def test_rank_returns_more_than_one_candidate():
+    roster = _roster([("WR", 92.0), ("QB", 60.0)])
+    ranked = ValueDrafter().rank(_rank_test_pool(), roster, 16, 14,
+                                 picks_until_next=5, top_n=3)
+    assert len(ranked) >= 2
+    # Best-first, and consistent with choose()'s own tie-break key.
+    for a, b in zip(ranked, ranked[1:]):
+        assert (a.gain, a.raw_value) >= (b.gain, b.raw_value)
+
+
+def test_each_candidate_carries_its_own_distinct_reasoning():
+    """The bug report this answers: every pick showed the same templated
+    sentence. Two candidates at different positions with different survivor
+    situations must not read identically."""
+    roster = _roster([("WR", 92.0), ("QB", 60.0)])
+    ranked = ValueDrafter().rank(_rank_test_pool(), roster, 16, 14,
+                                 picks_until_next=5)
+    reasons = {c.position: c.reason for c in ranked}
+    assert reasons["RB"] != reasons["TE"]
+    assert "no rush" in reasons["TE"].lower()
+
+
+def test_a_forced_pick_returns_a_single_flagged_candidate():
+    """Scarcity backstop: no real alternative exists, so `rank()` must not
+    manufacture a comparison out of it."""
+    roster = _roster([("WR", 90.0), ("WR", 40.0), ("RB", 50.0), ("RB", 30.0),
+                      ("TE", 30.0), ("QB", 60.0), ("WR", 20.0)])
+    pool = _pool([
+        ("Bench WR", "WR", 5.0, 83),
+        ("Only K", "K", -40.0, 182),
+    ])
+    ranked = ValueDrafter().rank(pool, roster, 16, 2, picks_until_next=8)
+    assert len(ranked) == 1
+    assert ranked[0].forced is True
+    assert ranked[0].position == "K"

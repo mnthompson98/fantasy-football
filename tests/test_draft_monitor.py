@@ -151,6 +151,24 @@ def test_zero_picks_still_produces_a_board(board):
     assert "YOU ARE ON THE CLOCK" in render(state, caps=CAPS)
 
 
+def test_the_recommendation_comes_with_a_couple_of_alternatives(board):
+    """One template sentence repeated at every pick, with no runner-up shown,
+    was not a recommendation a manager could actually weigh -- there was
+    nothing to compare it against. `state.candidates` carries the pick plus
+    the next couple of contenders, each with its own reasoning, and the
+    terminal lists them under "also considered"."""
+    state = _state([], board, slot=1)
+    assert len(state.candidates) > 1
+    # Each candidate's own reasoning, not the winner's repeated verbatim.
+    reasons = {c.reason for c in state.candidates}
+    assert len(reasons) > 1, "alternatives should not all share one sentence"
+
+    out = render(state, caps=CAPS)
+    assert "also considered:" in out
+    for alt in state.candidates[1:]:
+        assert alt.player_name in out
+
+
 def test_pick_counter_is_the_pick_on_the_clock_not_the_last_one_made(feed, board):
     """The header said "pick N" when N picks were *complete* — one behind.
 
@@ -687,14 +705,28 @@ def test_filter_search_and_hide_persist_across_the_auto_reload(board, tmp_path):
 def test_the_live_board_shows_the_suggested_pick_and_why(board, tmp_path):
     """The phone was the one device you actually draft from, and it was just
     a searchable table -- the recommendation and its reasoning existed only
-    in the terminal. `refresh_html` now carries both onto the page itself."""
-    rec = board.iloc[0]
+    in the terminal. `refresh_html` now carries both onto the page itself,
+    plus the runners-up `rank()` returns alongside the winner."""
+    from src.backtest.draft_sim import Candidate
+
+    top = Candidate(index=0, position="WR",
+                    player_name=str(board.iloc[0]["player_name"]),
+                    gain=12.0, value=150.0, raw_value=50.0,
+                    reason="Because reasons.")
+    alt = Candidate(index=1, position="RB",
+                    player_name=str(board.iloc[1]["player_name"]),
+                    gain=3.0, value=120.0, raw_value=40.0,
+                    reason="A runner-up reason.")
     path = refresh_html(board, tmp_path / "board.html", set(),
-                        recommendation=rec, reason="Because reasons.")
+                        candidates=[top, alt])
     html = path.read_text(encoding="utf-8")
     assert "Suggested pick" in html
-    assert str(rec["player_name"]) in html
+    assert top.player_name in html
     assert "Because reasons." in html
+    # The alternative, and its own distinct reasoning -- not a repeat of the
+    # winner's.
+    assert alt.player_name in html
+    assert "A runner-up reason." in html
 
 
 def test_no_recommendation_means_no_banner(board, tmp_path):
@@ -702,27 +734,21 @@ def test_no_recommendation_means_no_banner(board, tmp_path):
     assert "Suggested pick" not in path.read_text(encoding="utf-8")
 
 
-def test_explain_prefers_urgency_when_the_position_is_about_to_run_out():
-    """Mirrors the real diagnosis: WR Top (best ADP, will not survive) should
-    read as urgent; QB Top (deep, unthreatened bench behind him) should not.
-    Reuses `_lookahead_bug_fixture()` rather than a fresh board, because
-    getting this right requires care -- QB Top's own ADP has to place him
-    *outside* the dropped-by-ADP window so his own survival, not a second
-    good QB, is what produces zero urgency."""
-    from src.backtest.draft_sim import Roster, ValueDrafter
-    from src.draft.monitor import explain
+def test_a_forced_pick_shows_no_alternatives_section(board, tmp_path):
+    """A scarcity/end-of-draft backstop is a single-element candidate list --
+    there is no real runner-up to show, only the forced reason."""
+    from src.backtest.draft_sim import Candidate
 
-    avail = _lookahead_bug_fixture()
-    roster = Roster(team_id=0, starters={"QB": 1, "WR": 2}, flex_slots=0,
-                    flex_eligible=(), bench_slots=12)
-    d = ValueDrafter(caps={"QB": 1})
-
-    wr_top = avail[avail.player_id == "wr_top"].iloc[0]
-    qb_top = avail[avail.player_id == "qb_top"].iloc[0]
-    urgent = explain(d, roster, avail, wr_top, lookahead=6)
-    patient = explain(d, roster, avail, qb_top, lookahead=6)
-    assert "won't last" in urgent.lower()
-    assert "not urgent" in patient.lower()
+    forced = Candidate(index=0, position="K",
+                       player_name=str(board.iloc[0]["player_name"]),
+                       gain=float("inf"), value=80.0, raw_value=-40.0,
+                       reason="Only 2 Ks left.", forced=True)
+    html = refresh_html(board, tmp_path / "board.html", set(),
+                        candidates=[forced]).read_text(encoding="utf-8")
+    assert "Only 2 Ks left." in html
+    # "rec-alts" alone would match the CSS class definition, which is always
+    # present -- the actual rendered block is what must be absent.
+    assert '<div class="rec-alts">' not in html
 
 
 def test_no_configured_draft_id_defaults_to_the_safe_path():

@@ -1,7 +1,7 @@
 {
  "note": "Board-vs-ADP parity baseline. Guarded quantity is the GAP between the two runs: same data, same seed, same pick policy, same caps, same scorer, only the player ordering differs. Regenerate with `python -m scripts.check_backtest_baseline --write` and justify the move in the commit message.",
  "recorded": "2026-08-31",
- "git_commit": "609565a",
+ "git_commit": "07f5b2a",
  "tolerance": {
   "parity_gap": 0.35,
   "playoff_gap": 12.0,
@@ -17,7 +17,7 @@
   "src/features/market_anchor.py": "b472c04e229a5dd3",
   "src/features/slopes.py": "922965d26954949a",
   "src/features/vorp.py": "82905ba7da12b785",
-  "src/backtest/draft_sim.py": "ac9f3216ccc29ab9"
+  "src/backtest/draft_sim.py": "4b6f532332f43a83"
  },
  "drafts_per_season": 40,
  "seed": 20260830,

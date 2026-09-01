@@ -158,8 +158,7 @@ def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
 
 
 def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
-                 *, meta: dict | None = None,
-                 recommendation=None, reason: str | None = None) -> Path:
+                 *, meta: dict | None = None, candidates=None) -> Path:
     """Rewrite the phone board with the live draft's picks struck through.
 
     The HTML shipped as a tap-to-strike sheet backed by localStorage, which is
@@ -173,22 +172,23 @@ def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
     a *union* with the feed, not the only source. A player the feed says is gone
     cannot be un-struck by tapping, because he is gone.
 
-    `recommendation`/`reason` are the same values the terminal prints as
-    `>> TAKE:` / `why:`. Without them the phone board was just a sortable
-    table — on the one device you are actually drafting from, the thing that
-    tells you what to do was terminal-only.
+    `candidates` is `ValueDrafter.rank()`'s output — the pick plus a couple of
+    runners-up, each carrying its own `.reason` — the same thing the terminal
+    prints as `>> TAKE:` / `also considered:`. Without it the phone board was
+    just a sortable table with no opinion on it — on the one device you are
+    actually drafting from, the thing that tells you what to do was
+    terminal-only.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_render_html(board, meta or {}, drafted=drafted,
-                                 recommendation=recommendation, reason=reason),
+                                 candidates=candidates),
                     encoding="utf-8")
     return path
 
 
 def _render_html(board: pd.DataFrame, meta: dict,
-                 *, drafted: set | None = None,
-                 recommendation=None, reason: str | None = None) -> str:
+                 *, drafted: set | None = None, candidates=None) -> str:
     """Self-contained, phone-readable board with position filtering and search."""
     records = board.fillna("").to_dict(orient="records")
     payload = json.dumps(records)
@@ -210,32 +210,31 @@ def _render_html(board: pd.DataFrame, meta: dict,
                    if drafted is not None else "")
 
     rec_html = ""
-    if recommendation is not None:
-        pos = str(recommendation.get("position", ""))
-        name = str(recommendation.get("player_name", ""))
-        vorp = recommendation.get("vorp")
-        adp = recommendation.get("adp_rank")
-        delta = recommendation.get("adp_delta")
-        try:
-            vorp_s = f"{float(vorp):.1f}"
-        except (TypeError, ValueError):
-            vorp_s = "—"
-        try:
-            adp_s = f"ADP {int(float(adp))}"
-        except (TypeError, ValueError):
-            adp_s = ""
-        try:
-            d = int(float(delta))
-            adp_s += f" ({d:+d})" if adp_s else f"{d:+d}"
-        except (TypeError, ValueError):
-            pass
-        reason_html = f'<div class="rec-why">{reason}</div>' if reason else ""
+    cands = list(candidates or [])
+    if cands:
+        top, rest = cands[0], cands[1:]
+        top_reason = f'<div class="rec-why">{top.reason}</div>' if top.reason else ""
+        alt_html = ""
+        # A forced pick (scarcity / end-of-draft) is always alone in the list
+        # — there is no real alternative to show, only a reason there wasn't
+        # one, and `top_reason` already says so.
+        if rest:
+            rows = "".join(
+                f"""<div class="alt">
+      <span class="pos {a.position}">{a.position}</span> {a.player_name}
+      <span class="alt-vorp">VORP {a.raw_value:.1f}</span>
+      <div class="alt-why">{a.reason}</div>
+    </div>"""
+                for a in rest
+            )
+            alt_html = f'<div class="rec-alts">{rows}</div>'
         rec_html = f"""
   <div class="rec">
     <div class="rec-label">Suggested pick</div>
-    <div class="rec-player"><span class="pos {pos}">{pos}</span> {name}</div>
-    <div class="rec-stats">VORP {vorp_s}{" · " + adp_s if adp_s else ""}</div>
-    {reason_html}
+    <div class="rec-player"><span class="pos {top.position}">{top.position}</span> {top.player_name}</div>
+    <div class="rec-stats">VORP {top.raw_value:.1f}</div>
+    {top_reason}
+    {alt_html}
   </div>"""
 
     return f"""<!doctype html>
@@ -302,6 +301,11 @@ def _render_html(board: pd.DataFrame, meta: dict,
   .rec-player{{font-size:17px;font-weight:700;margin:2px 0}}
   .rec-stats{{font-size:12px;color:var(--muted)}}
   .rec-why{{font-size:12.5px;color:var(--fg);margin-top:4px;line-height:1.4}}
+  .rec-alts{{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}}
+  .alt{{font-size:13px;margin-top:6px}}
+  .alt:first-child{{margin-top:0}}
+  .alt-vorp{{color:var(--muted);font-size:11.5px;margin-left:4px}}
+  .alt-why{{font-size:11.5px;color:var(--muted);line-height:1.3;margin-top:1px}}
   /* On a phone the projection column is the first thing to go: VORP already
      carries it, and ADP and the delta are what you actually compare. */
   @media (max-width:430px) {{
