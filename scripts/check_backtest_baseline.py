@@ -74,6 +74,12 @@ MAX_LOSS_TO_ADP = 0.50
 # valuation the board and the backtest share; the last is the pick policy, which
 # is held constant across the two orderings but moves both levels when it
 # changes. An edit to any of them invalidates the baseline.
+#
+# `src/backtest/opponent_fit.py` is deliberately absent. The baseline is
+# recorded against the gaussian field, and that field never calls it, so an edit
+# there cannot move a single recorded number — listing it would fire this
+# tripwire on changes that are provably irrelevant to the fixture, which is the
+# fastest way to teach everyone to re-record without looking.
 FINGERPRINTED = (
     "src/features/pipeline.py",
     "src/features/blend.py",
@@ -211,13 +217,18 @@ def _git_commit() -> str:
         return "unknown"
 
 
-def measure(drafts: int, *, verbose: bool = True) -> dict:
+def measure(drafts: int, *, verbose: bool = True,
+            opponent: str | None = None) -> dict:
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     summaries = evaluate(cfg, value_cols=VALUE_COLS, drafts=drafts,
-                         label="baseline-check", verbose=verbose)
+                         label=f"baseline-check-{opponent}" if opponent
+                         else "baseline-check",
+                         verbose=verbose, opponent=opponent)
     return {
         "drafts_per_season": drafts,
         "seed": int(cfg["backtest"]["seed"]),
+        "opponent": opponent or (cfg["backtest"].get("opponent_model", {})
+                                 .get("model", "gaussian")),
         "runs": {col: summarize(s) for col, s in summaries.items()},
     }
 
@@ -247,11 +258,32 @@ def main() -> int:
                          "do this when you have decided the new numbers are "
                          "correct, and say why in the commit message.")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--opponent", default=None,
+                    choices=("gaussian", "league"),
+                    help="the field both runs draft against. The recorded "
+                         "baseline is 'gaussian'; run 'league' to see what a "
+                         "realistic field does to the gap, but do NOT "
+                         "--write a baseline measured under it without saying "
+                         "so, because the two are not comparable.")
     args = ap.parse_args()
 
-    actual = measure(args.drafts, verbose=not args.quiet)
-    print("\nboard vs pure ADP (league rank by points; lower is better):")
+    actual = measure(args.drafts, verbose=not args.quiet,
+                     opponent=args.opponent)
+    print(f"\nboard vs pure ADP (league rank by points; lower is better) "
+          f"· opponents {actual['opponent']}:")
     print(render(actual))
+
+    if args.write and args.opponent not in (None, "gaussian"):
+        # The fixture records one field. A baseline written under a different
+        # one would compare two runs that never faced the same opposition, and
+        # the next person to run the guard would be checking parity against a
+        # number produced by a different experiment.
+        print(f"\nrefusing to --write a baseline measured against the "
+              f"'{args.opponent}' field: tests/fixtures/backtest_baseline.json "
+              f"records the gaussian field, and rows produced under different "
+              f"opponents are not comparable. Re-record under the default "
+              f"field, or change what ships first.", file=sys.stderr)
+        return 1
 
     if args.write:
         payload = {
@@ -282,6 +314,28 @@ def main() -> int:
 
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     problems = compare(actual, baseline)
+
+    # A run against a different field is an experiment, not a regression. The
+    # fixture guards the valuation, and the valuation did not move — so print
+    # the differences as a finding and exit 0 rather than reporting a drift the
+    # next person would go looking for in `features/`.
+    baseline_opponent = baseline.get("opponent", "gaussian")
+    if actual["opponent"] != baseline_opponent:
+        print(f"\nnot a parity check: this run faced the "
+              f"'{actual['opponent']}' field and the baseline recorded "
+              f"'{baseline_opponent}'. Differences below are the cost of "
+              f"changing the opposition, not of changing the valuation.")
+        for p in problems:
+            print(f"  - {p}")
+        gap = (actual['runs']['vorp']['all']['league_rank_by_points']
+               - actual['runs']['adp_value']['all']['league_rank_by_points'])
+        gap0 = (baseline['runs']['vorp']['all']['league_rank_by_points']
+                - baseline['runs']['adp_value']['all']['league_rank_by_points'])
+        print(f"\nboard-vs-ADP gap: {gap0:+.3f} against '{baseline_opponent}' "
+              f"-> {gap:+.3f} against '{actual['opponent']}' "
+              f"({gap - gap0:+.3f}).")
+        return 0
+
     if problems:
         print(f"\nPARITY DRIFT vs {baseline['recorded']} "
               f"({baseline['git_commit']}):", file=sys.stderr)

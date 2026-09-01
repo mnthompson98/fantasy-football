@@ -285,6 +285,61 @@ depend on these. The league payload also carries a vestigial
   there is no real alternative to show there, only the reason there wasn't
   one.
 
+- **The simulated field is a modelling choice, and it moves the answer by more
+  than any valuation change ever has.** "Opponents draft ADP with gaussian
+  noise" was a Known Limitation; it is now measured against this league's own
+  2021 and 2025 drafts (`src/backtest/opponent_fit.py`,
+  `scripts/fit_opponent_model.py`). Two things came out of it.
+
+  First, the deviation is **K and DEF, and it is enormous**: a kicker goes 81
+  picks and a defense 47 picks earlier than his consensus rank relative to
+  everyone else, in both drafts, t ≈ −10. Regressing pick number on consensus
+  rank per position gives 1.03 for RB and 0.96 for WR against 0.25 for K and
+  0.11 for DEF — the room does not *shift* those positions up the board, it
+  ignores the consensus's ordering of them and takes one per team in rounds
+  12-14. That is why the model is a **run curve** ("when does the k-th kicker
+  go") blended with the consensus board, not a bias on ADP rank: a constant
+  offset cannot express a slope of 0.11, and fitting one by simulated moments
+  drives QB to a sigma of 123 picks chasing structure as if it were noise.
+  Among the skill positions this league takes QB and TE *earlier* than
+  consensus and WR later — 2021 and 2025 agree to within one pick per round —
+  which is the opposite of the intuition that QB and TE get pushed back.
+
+  Second: **swapping the gaussian field for the fitted one costs about 1.2
+  places, and it costs the board and pure ADP the same 1.2 places.** The board
+  goes 4.37 → 5.58, ADP 4.37 → 5.14; refitting the field on both drafts instead
+  of only the prior one gives 5.57 and 5.59. Same data, seed, valuation, pick
+  policy, caps and scorer — only the opposition changed. Most of the ~1.1-place
+  edge the backtest reports is an artifact of the gaussian field.
+
+  **The board-vs-ADP *gap* is a different story and the answer there is "no
+  measurable effect":** −0.00 → +0.43 fitting on the prior draft only, −0.00 →
+  −0.02 fitting on both. The two fit scopes disagree by the entire size of the
+  effect, so four folds cannot separate them. Quote the pair, never the +0.43
+  alone. HANDOFF's "the edge comes from the pick policy" survives both results
+  and now carries a caveat: the policy's lookahead
+  (`ValueDrafter.survivors()`) assumes the field drafts straight down ADP,
+  which this league does not do, and that is the most likely cause of the
+  level drop.
+
+  **`survivors()` was deliberately left as it was.** Teaching it the fitted
+  field is a *policy* change — it would move what `src/draft/monitor.py`
+  recommends live — so it must be measured on its own rather than smuggled in
+  with a change to the opposition. Keeping it fixed is also what makes the two
+  runs a comparison of fields rather than of two drafters.
+
+  The shipping default is still `gaussian` (`backtest.opponent_model.model`);
+  `--opponent league` runs the other. The default path constructs the same
+  object from the same generator drawing in the same order, verified
+  bit-for-bit, because `tests/fixtures/backtest_baseline.json` and every number
+  in HANDOFF.md were measured under it. **Never re-record that fixture under the
+  league field** — `check_backtest_baseline --write --opponent league` refuses,
+  for the same reason rows scored under different scorers are not comparable.
+  Each fold fits only on drafts held before its own season, which for the whole
+  2022-2025 window means the 2021 draft alone: 120 picks, 8 teams. Thin, and the
+  per-fold swings are large. The direction is real; the magnitude is a
+  four-fold estimate.
+
 - **The board and the backtest share one valuation pipeline.**
   `src/features/pipeline.py` is called by both `scripts/build_draft_board.py`
   and `scripts/run_backtest.py`. If they diverge, the backtest is scoring a

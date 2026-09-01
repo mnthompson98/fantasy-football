@@ -6,15 +6,62 @@ real managers do, and a strategy tuned against perfect opponents will not
 survive contact with a real league. Real managers reach, chase names, and
 draft for need — so that is what we model.
 
-Opponent pick model, per pick:
+Two opponent models live here, and which one runs is a flag
+(`backtest.opponent_model.model`, or `--opponent` on the scripts):
+
+**`OpponentModel` — gaussian, the fallback.** Per pick:
     1. score each available player by ADP rank with gaussian noise:
        key = adp_rank + N(0, sigma[position])
     2. multiply by a positional-need factor (unfilled starting slot -> more
        likely; already-full position -> much less likely)
     3. take the minimum key
+Sigma comes from the config priors. This is the model every recorded backtest
+number was produced under, so it stays here, unchanged, bit-for-bit.
 
-Sigma is calibrated per position from historical ADP-vs-actual-draft-slot error
-(`scripts/calibrate_adp_sigma.py`); config priors are the fallback.
+**`LeagueOpponentModel` — fitted to this league's own drafts.** Same argmin,
+but the key is a blend of two clocks, both in rounds:
+
+    consensus = adp_rank / teams              # where the board says he goes
+    schedule  = curve[position](k / teams)    # when this room takes the k-th
+                                              # player at his position
+
+    key = (1 - w[position]) * consensus + w[position] * schedule
+        + N(0, sigma[position])
+        + over_ceiling_penalty                # if the roster is already full there
+
+`k` counts the players at that position already gone plus his own ADP rank
+among those still available. Everything is measured by
+`src/backtest/opponent_fit.py` from the real drafts under
+`data/league_history/`, normalized per team so an 8-team draft and a 10-team
+draft pool and either can drive a simulation of the other size.
+
+**Why a blend and not one or the other.** Neither clock alone describes the
+room. Fitting `pick_no ~ adp_rank` per position over this league's 2021 and
+2025 drafts gives slopes of 0.97 for RB and 0.86 for WR — those go at consensus
+— against 0.25 for K and 0.11 for DEF. The room does not *shift* kickers up the
+board, it ignores the consensus's ordering of them almost entirely and takes
+one per team in rounds 12-14 regardless, so no constant bias can express it.
+But a pure schedule is board-blind in the other direction: this league opened
+2021 with eight running backs and 2025 with five receivers, and it did so
+because those were the two boards. Averaging those two rounds into one schedule
+describes neither draft. `w` is fitted per position, closed-form, as exactly
+the weight that best reconciles the two — and it lands where the regression
+slopes say it should: near 0 for RB and WR, near 1 for K and DEF.
+
+**What was wrong with the gaussian field.** Its need factor is *multiplicative
+on the key*, so its size depends on where you are on the board: at ADP rank 250
+the 1/1.6 boost is worth 94 picks, at rank 10 it is worth 4. That single scale
+error makes the simulated field draft every defense in round 8 and every kicker
+in round 9. This league takes its first defense in round 11 and its first
+kicker in round 10 — and in 2021, round 13 for both. Two to four rounds of the
+middle of every simulated draft are therefore spent on the wrong positions,
+which is exactly the stretch where the pick policy's lookahead is deciding what
+survives to the next turn.
+
+Neither model is consulted by `ValueDrafter`, so switching them gives our side
+no information it would not have had. What changes is the realism of the board
+it faces. `ValueDrafter.survivors()` still assumes the field drafts straight
+down ADP — see its docstring.
 """
 
 from __future__ import annotations
@@ -142,6 +189,197 @@ class OpponentModel:
             1.0 / self.need_penalty,
         )
         key = key * factors
+
+        return int(available.index[int(np.argmin(key))])
+
+
+@dataclass(frozen=True)
+class LeagueTendencies:
+    """When this league's room takes the k-th player at each position.
+
+    `curve[pos]` is a monotone lookup from **k per team** to **round**: the
+    entry at 0.9 for QB says that by the time nine tenths of a quarterback per
+    team have been drafted (nine of them in a ten-team league), the draft is
+    somewhere in round 7.3. Both axes are normalized by league size so drafts of
+    different sizes pool, and so a curve measured on an 8-team league can drive
+    a 10-team simulation.
+
+    Stored as two parallel lists rather than a mapping because that is what
+    `np.interp` wants and what serializes to JSON without inventing a key
+    format. `k_per_team` is shared by every position; `rounds[pos]` is that
+    position's curve over it.
+
+    `sigma_rounds` is the residual spread around the curve, in rounds, measured
+    the same way. `max_per_team` is what a team in this league actually ends up
+    holding, which is what stops a simulated manager taking a third kicker just
+    because kickers are cheap in round 13.
+
+    Fitted by `src/backtest/opponent_fit.py`; `provenance` records which drafts
+    produced it, so a logged run can be traced back to them.
+    """
+
+    k_per_team: list[float]
+    rounds: dict[str, list[float]]
+    # How much of a position's timing the room's own schedule explains, against
+    # the consensus board. 0 = drafted straight off the board, 1 = the board's
+    # ordering of the position is ignored and it goes on schedule.
+    curve_weight: dict[str, float]
+    sigma_rounds: dict[str, float]
+    max_per_team: dict[str, float]
+    # Rounds added to the key once a roster is at its ceiling for the position.
+    # Large enough to push it behind everything else genuinely in contention,
+    # small enough that a forced pick at the very end of the draft still works.
+    over_ceiling_penalty: float = 8.0
+    provenance: str = ""
+
+    def curve_for(self, position: str) -> np.ndarray | None:
+        vals = self.rounds.get(position)
+        return np.asarray(vals, dtype=float) if vals else None
+
+    def to_dict(self) -> dict:
+        return {
+            "k_per_team": [round(float(k), 4) for k in self.k_per_team],
+            "rounds": {k: [round(float(x), 3) for x in v]
+                       for k, v in sorted(self.rounds.items())},
+            "curve_weight": {k: round(float(v), 4)
+                             for k, v in sorted(self.curve_weight.items())},
+            "sigma_rounds": {k: round(float(v), 4)
+                             for k, v in sorted(self.sigma_rounds.items())},
+            "max_per_team": {k: round(float(v), 3)
+                             for k, v in sorted(self.max_per_team.items())},
+            "over_ceiling_penalty": float(self.over_ceiling_penalty),
+            "provenance": self.provenance,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LeagueTendencies":
+        return cls(
+            k_per_team=[float(k) for k in (d.get("k_per_team") or [])],
+            rounds={str(k): [float(x) for x in v]
+                    for k, v in (d.get("rounds") or {}).items()},
+            curve_weight={str(k): float(v)
+                          for k, v in (d.get("curve_weight") or {}).items()},
+            sigma_rounds={str(k): float(v)
+                          for k, v in (d.get("sigma_rounds") or {}).items()},
+            max_per_team={str(k): float(v)
+                          for k, v in (d.get("max_per_team") or {}).items()},
+            over_ceiling_penalty=float(d.get("over_ceiling_penalty", 8.0)),
+            provenance=str(d.get("provenance", "")),
+        )
+
+
+def positional_queue_numbers(positions: np.ndarray, adp: np.ndarray,
+                             taken: dict[str, int]) -> np.ndarray:
+    """For each available player, his k: which one at his position he would be.
+
+    k = (already gone at that position) + (his ADP rank among those still
+    available at it). So the best remaining quarterback when six are gone is the
+    seventh quarterback, and the curve is asked when the seventh quarterback
+    goes.
+
+    Vectorized deliberately. The obvious loop is 500 iterations per pick and
+    160 picks per draft over hundreds of drafts, which is tens of millions of
+    Python-level steps in the inner loop of every backtest.
+    """
+    codes, inverse = np.unique(positions, return_inverse=True)
+    order = np.lexsort((adp, inverse))
+    sorted_inverse = inverse[order]
+    starts = np.flatnonzero(
+        np.r_[True, sorted_inverse[1:] != sorted_inverse[:-1]])
+    group_start = np.repeat(starts, np.diff(np.r_[starts, len(order)]))
+
+    within = np.empty(len(order), dtype=float)
+    within[order] = np.arange(len(order)) - group_start + 1.0
+    already = np.array([float(taken.get(str(c), 0)) for c in codes])
+    return already[inverse] + within
+
+
+# Past the deepest k a position was ever drafted to, the curve must keep
+# climbing, and steeply: the room did not merely slow down there, it stopped.
+# In rounds per player-per-team, so 10.0 is one extra round for each additional
+# body at the position in a 10-team league. Flattening the tail instead — the
+# obvious `np.interp` clamp — makes every remaining quarterback tie at the last
+# fitted round, and the field then drafts six of them in round 14.
+TAIL_SLOPE_ROUNDS_PER_K = 10.0
+
+
+class LeagueOpponentModel:
+    """Samples opponent picks from this league's own drafting schedule.
+
+    key = (1 - w[pos]) * adp_rank / teams        # the consensus clock
+        + w[pos] * curve[pos](k / teams)         # the room's own clock
+        + N(0, sigma_rounds[pos])
+        + over_ceiling_penalty   if this roster already holds its ceiling there
+
+    Everything is in rounds, so nothing changes meaning between the top of the
+    board and the bottom — which is the specific way the gaussian model's
+    multiplicative need factor goes wrong (module docstring).
+
+    The model needs to know how many players at each position are already gone
+    **league-wide**, and `choose` is only handed one roster. So it snapshots the
+    board's positional counts at construction and recovers the rest by
+    subtraction from `available`, which is exact and costs nothing. That is why
+    the factory takes the board.
+
+    A position the fit never saw gets `w = 0` — drafted straight off the
+    consensus board, which is the gaussian field's assumption without the noise,
+    and the honest default when there is nothing measured.
+    """
+
+    def __init__(self, tendencies: LeagueTendencies, board: pd.DataFrame,
+                 teams: int, rng: np.random.Generator | None = None):
+        self.t = tendencies
+        self.teams = max(1, int(teams))
+        self.rng = rng or np.random.default_rng()
+        self.initial = (board["position"].astype(str).value_counts()
+                        .to_dict() if len(board) else {})
+        self._grid = np.asarray(tendencies.k_per_team, dtype=float)
+
+    def _rounds_for(self, position: str, k_per_team: np.ndarray,
+                    adp: np.ndarray) -> np.ndarray:
+        """This position's key, in rounds, before noise and the ceiling."""
+        consensus = adp / self.teams
+        curve = self.t.curve_for(position)
+        w = float(self.t.curve_weight.get(position, 0.0))
+        if curve is None or not len(self._grid) or w <= 0.0:
+            return consensus
+
+        scheduled = np.interp(k_per_team, self._grid, curve)
+        beyond = k_per_team > self._grid[-1]
+        if beyond.any():
+            scheduled[beyond] = curve[-1] + TAIL_SLOPE_ROUNDS_PER_K * (
+                k_per_team[beyond] - self._grid[-1])
+        return (1.0 - w) * consensus + w * scheduled
+
+    def choose(self, available: pd.DataFrame, roster: Roster) -> int:
+        """Return the index label of the chosen player."""
+        if available.empty:
+            raise ValueError("no players available")
+
+        positions = available["position"].astype(str).to_numpy()
+        adp = available["adp_rank"].to_numpy(dtype=float)
+
+        counts = available["position"].astype(str).value_counts().to_dict()
+        taken = {p: int(self.initial.get(p, 0)) - int(counts.get(p, 0))
+                 for p in self.initial}
+        k = positional_queue_numbers(positions, adp, taken) / self.teams
+
+        key = np.empty(len(adp), dtype=float)
+        for pos in np.unique(positions):
+            m = positions == pos
+            key[m] = self._rounds_for(str(pos), k[m], adp[m])
+
+        sigmas = np.array([self.t.sigma_rounds.get(p, 0.75)
+                           for p in positions], dtype=float)
+        key = key + self.rng.normal(0.0, sigmas)
+
+        have = roster.counts()
+        ceiling = np.array([
+            have.get(p, 0) >= max(1, int(np.floor(
+                self.t.max_per_team.get(p, 99.0))))
+            for p in positions
+        ])
+        key = key + np.where(ceiling, self.t.over_ceiling_penalty, 0.0)
 
         return int(available.index[int(np.argmin(key))])
 
@@ -325,7 +563,17 @@ class ValueDrafter:
 
         Opponents draft near ADP, so the next `picks_until_next` players off the
         board are approximately the top of the remaining ADP list. This is the
-        same assumption the opponent model makes, minus the noise.
+        gaussian opponent model's assumption, minus the noise.
+
+        It is deliberately **not** updated to match `LeagueOpponentModel`.
+        Teaching this the league's fitted biases would change the pick policy,
+        and the pick policy is where the whole measured edge lives (HANDOFF.md,
+        "What the edge actually is") — it is also shared with the live monitor,
+        so it would change what gets recommended on draft day. Swapping the
+        opponent model changes only the field; keeping this fixed is what makes
+        the two runs a comparison of fields rather than of two different
+        drafters. Aligning them is a separate, larger question, and it should be
+        measured on its own.
         """
         if picks_until_next <= 0:
             return available
@@ -492,17 +740,49 @@ class ValueDrafter:
         return candidates[:top_n] if top_n else candidates
 
 
+def gaussian_opponent(sigma: dict[str, float], need_boost: float = 1.6,
+                      need_penalty: float = 0.4):
+    """The default opponent factory: `(rng, board, teams) -> OpponentModel`.
+
+    A factory rather than an instance because the draft owns the RNG — it is
+    seeded per draft, and an opponent carrying its own generator would make a
+    run irreproducible from its logged seed. The board and team count are in
+    the signature for `LeagueOpponentModel`, which needs both; this one ignores
+    them.
+    """
+    def make(rng: np.random.Generator, board: pd.DataFrame,
+             teams: int) -> OpponentModel:
+        return OpponentModel(sigma, need_boost, need_penalty, rng)
+    return make
+
+
+def league_opponent(tendencies: LeagueTendencies):
+    """`(rng, board, teams) -> LeagueOpponentModel`, for the fitted field."""
+    def make(rng: np.random.Generator, board: pd.DataFrame,
+             teams: int) -> LeagueOpponentModel:
+        return LeagueOpponentModel(tendencies, board, teams, rng)
+    return make
+
+
 def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
                    my_slot: int, starters: dict[str, int], flex_slots: int,
                    flex_eligible: tuple[str, ...], sigma: dict[str, float],
                    need_boost: float = 1.6, need_penalty: float = 0.4,
                    value_col: str = "vorp", seed: int | None = None,
                    caps: dict[str, int] | None = None,
+                   opponent_factory=None,
                    ) -> dict[int, Roster]:
     """Run one full snake draft.
 
     `board` needs columns: `player_id`, `player_name`, `position`, `adp_rank`,
     and `value_col`. `my_slot` is 1-indexed.
+
+    `opponent_factory` takes the draft's RNG and returns the model the nine
+    other seats draft with. `None` builds the gaussian model from `sigma`,
+    `need_boost` and `need_penalty` exactly as this function always did — the
+    same object, constructed with the same generator, drawing in the same
+    order — so every number recorded before the model became swappable still
+    reproduces bit-for-bit.
 
     Returns every team's roster so the scorer can compare ours against the
     league, not just measure ours in isolation.
@@ -522,7 +802,9 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
         for t in range(teams)
     }
 
-    opponent = OpponentModel(sigma, need_boost, need_penalty, rng)
+    factory = opponent_factory or gaussian_opponent(sigma, need_boost,
+                                                    need_penalty)
+    opponent = factory(rng, board, teams)
     me = ValueDrafter(value_col, caps=caps)
     my_team = my_slot - 1
 

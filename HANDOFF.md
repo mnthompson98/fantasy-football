@@ -1,8 +1,9 @@
 # Handoff: Draft Board & In-Season System
 
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01
 **Repo:** https://github.com/mnthompson98/fantasy-football
-**Branch:** main · **Tests:** 219 passing + 1 gated skip, Python 3.14
+**Branch:** `claude/league-opponent-model-kd1fy3` · **Tests:** 238 passing + 1 gated skip
+(plus one pre-existing failure, see below), Python 3.14
 **2026 league:** `Camden?` · league `1389723592727461888` · draft `1389723592727461889`
 10 teams · 16 rounds · snake · status `pre_draft`
 
@@ -35,6 +36,13 @@ decisions-with-reasons. This file is state, progress and what to do next.
 
 # ...or let the parity guard run both orderings and diff them for you.
 .venv/Scripts/python.exe -m scripts.check_backtest_baseline
+
+# How this league drafts vs national consensus, and the field fitted to it.
+.venv/Scripts/python.exe -m scripts.fit_opponent_model
+
+# Either of the two above against that fitted field instead of ADP-plus-noise.
+# Read "The opponent model" below before interpreting the result.
+.venv/Scripts/python.exe -m scripts.check_backtest_baseline --opponent league
 ```
 
 Set `PYTHONIOENCODING=utf-8` first — Windows defaults to cp1252 and dies on the
@@ -57,7 +65,7 @@ first accented player name.
 
 ## State: what is built
 
-All of it tested; 219 unit tests.
+All of it tested; 238 unit tests.
 
 **Ingest** — `sleeper_api` (read-only client, standings/bracket resolution),
 `nflverse` (cached pulls, season-aware freshness), `player_ids` (gsis-anchored
@@ -69,8 +77,6 @@ crosswalk), `history` (season-parameterized history + preseason ECR),
 `market_anchor`, `vorp`, `lineup` (**shared by all three in-season modules**),
 `availability` (durability), `scoring` (league rules applied to box scores).
 
-**Backtest** — `walkforward`, `draft_sim`, `metrics`, `leakage_guard`.
-
 **Draft** — `board` (parquet/CSV/HTML, live rewrite, auto-reloading phone board
 with persisted filters and a baked-in recommendation), `monitor` (live Sleeper
 poll; runs the simulator's own `ValueDrafter.rank()` for the pick *and* a
@@ -80,10 +86,14 @@ the policy, and not just the winner).
 **In-season** — `projections`, `roster`, `start_sit`, `waivers`, `trades`,
 `matchup`, `report`.
 
+**Backtest** — `walkforward`, `draft_sim`, `metrics`, `leakage_guard`,
+`opponent_fit` (the field, fitted to this league's own drafts).
+
 **Scripts** — `build_draft_board`, `run_backtest`, `verify_league_settings`,
 `weekly_update`, `schedule_weekly`, `build_league_history`, `replay_draft`
 (rehearse the monitor against a real completed draft),
-`check_backtest_baseline` (board-vs-ADP parity guard).
+`check_backtest_baseline` (board-vs-ADP parity guard),
+`fit_opponent_model` (how this league drafts against consensus).
 
 ---
 
@@ -211,6 +221,189 @@ The simulated team finishes ~4.4 of 10 against a field of ADP drafters, where
 caps — not from the projections. That is worth knowing before investing more in
 projection quality.
 
+**And most of it does not survive a realistic field.** See the next section.
+
+---
+
+## The opponent model — measured, fitted, and what it cost
+
+"Opponents draft ADP with gaussian noise" was a Known Limitation. It is now a
+measurement. `python -m scripts.fit_opponent_model` prints all of the below.
+
+### How this league actually drafts
+
+Both of this league's drafts under `data/league_history/` — 2021 (8 teams, 15
+rounds, `Etown vs Louisville`) and 2025 (10 teams, 16 rounds, `Camden?`, five
+seats shared with 2021) — joined to the same preseason ECR `adp_rank` the
+simulator drafts off. All 280 picks reconcile.
+
+`delta = pick_no - adp_rank`, centered on the pooled mean (only relative
+differences are identifiable; the raw mean is structurally negative because
+consensus ranks run past 500 and picks stop at 160):
+
+| pos | n | centered delta | t | 2021 | 2025 |
+|---|---|---|---|---|---|
+| **K** | 18 | **−80.8** | −9.7 | −89.3 | −73.8 |
+| **DEF** | 18 | **−47.0** | −10.3 | −45.3 | −48.1 |
+| QB | 34 | −1.3 | −0.2 | −16.2 | +12.5 |
+| TE | 31 | +0.7 | +0.2 | +7.5 | −3.7 |
+| RB | 82 | +10.4 | +7.9 | +14.1 | +7.7 |
+| WR | 97 | +15.1 | +9.7 | +18.1 | +12.9 |
+
+**The deviation is K and DEF, and it is enormous and replicates.** A kicker goes
+81 picks and a defense 47 picks earlier than his consensus rank relative to
+everyone else, in both drafts. Everything else is the arithmetic consequence:
+picks are conserved, so pulling 20 kickers and defenses forward pushes RB and WR
+back.
+
+Among the skill positions the pattern is smaller but consistent across both
+drafts. Cumulative counts against the consensus board taken straight down
+("chalk"), through round 6: **2021 was QB +3, TE +3, RB −1, WR −5; 2025 was
+QB +2, TE +3, RB −1, WR −4.** So this league takes two or three *more* QBs and
+about three more TEs in the first six rounds than the consensus implies, and
+four or five fewer WRs. **That is the opposite of the hypothesis in the brief**
+— QB and TE go *earlier* here, not later, and RB is at chalk rather than ahead
+of it.
+
+### Why the model is a run curve and not a bias
+
+Regressing pick number on consensus rank per position (robust, one 3σ refit):
+
+| pos | a | b | resid sd |
+|---|---|---|---|
+| RB | −1.5 | **1.027** | 8.9 |
+| WR | 6.9 | **0.959** | 9.1 |
+| TE | 4.9 | 0.832 | 13.2 |
+| QB | 39.6 | 0.402 | 32.8 |
+| K | 68.7 | **0.253** | 19.9 |
+| DEF | 90.7 | **0.114** | 8.3 |
+
+RB and WR go at consensus. The room does not *shift* kickers up the board — it
+ignores the consensus's ordering of them almost entirely and takes one per team
+in rounds 12–14 regardless of which kicker. No constant offset can express that,
+and fitting one by simulated moments drives QB to a sigma of 123 picks trying to
+reproduce a spread that is structure rather than noise.
+
+So `LeagueOpponentModel` keys on two clocks, both in rounds, blended per
+position by a closed-form weight:
+
+```
+key = (1 - w) * adp_rank/teams  +  w * curve[pos](k/teams)  +  N(0, sigma)
+      + over_ceiling_penalty if the roster is already full at that position
+```
+
+Fitted `w`: RB 0.78, WR 0.94, QB 1.00, TE 1.00, K 0.99, DEF 0.97. The pure
+schedule alone is board-blind in the other direction — this league opened 2021
+with eight running backs and 2025 with five receivers *because those were the
+two boards* — which is why the consensus clock stays in the blend.
+
+### What was wrong with the gaussian field
+
+Its need factor multiplies the key, so its size depends on where you are on the
+board: at ADP rank 250 the 1/1.6 boost is worth 94 picks, at rank 10 it is worth
+4. Consequence, simulated over the same boards:
+
+| | first K | first DEF |
+|---|---|---|
+| league 2021 | round 13 | round 13 |
+| league 2025 | round 10 | round 11 |
+| **gaussian field** | **round 9** | **round 8** |
+| fitted field | round 9–10 | round 10 |
+
+The gaussian field takes *every* defense in round 8 and *every* kicker in round
+9. Two to four rounds in the middle of every simulated draft are spent on the
+wrong positions — exactly the stretch where the pick policy's lookahead decides
+what survives to the next turn.
+
+### The delta: what a realistic field costs
+
+`check_backtest_baseline`, 40 drafts/season, seed 20260830, same data, same
+valuation, same pick policy, same caps, same scorer. Only the field changes.
+League rank by points, of 10; **5.50 is a coin flip; lower is better.**
+
+Three runs. The third fits the field on *both* drafts instead of only on the
+prior one — leaky for the 2025 fold and therefore not a shippable
+configuration, but the only way to ask whether the answer survives a
+better-identified field.
+
+| season | board (gauss) | ADP (gauss) | gap | board (league, prior) | ADP | gap | board (league, both) | ADP | gap |
+|---|---|---|---|---|---|---|---|---|---|
+| 2022 | 3.48 | 3.85 | −0.38 | 1.90 | 3.65 | −1.75 | 5.03 | 6.80 | −1.77 |
+| 2023 | 2.42 | 4.45 | −2.03 | 4.47 | 6.47 | −2.00 | 3.15 | 5.35 | −2.20 |
+| 2024 | 3.73 | 5.12 | −1.40 | 7.72 | 4.35 | +3.38 | 6.05 | 3.90 | +2.15 |
+| 2025 | 7.85 | 4.05 | +3.80 | 8.20 | 6.10 | +2.10 | 8.05 | 6.30 | +1.75 |
+| **mean** | **4.37** | **4.37** | **−0.00** | **5.58** | **5.14** | **+0.43** | **5.57** | **5.59** | **−0.02** |
+| playoff pts | 408.3 | 413.5 | −5.2 | 404.8 | 406.3 | −1.6 | 401.0 | 400.9 | +0.1 |
+
+The gaussian column reproduced the checked-in fixture (`parity holds against
+2026-08-31 (07f5b2a)`), so the columns differ only in the field.
+
+**Two findings, and only one of them holds.**
+
+**1. The board-vs-ADP gap does not reliably move. Answer: no measurable
+effect.** It goes −0.00 → **+0.43** fitting on the prior draft only, and
+−0.00 → **−0.02** fitting on both. The two fit scopes disagree by 0.45, which is
+the entire size of the effect. The honest reading is that a four-fold
+evaluation cannot separate them — the same conclusion CLAUDE.md reaches about
+seven other configuration changes. Do not quote +0.43 as the delta; quote the
+pair.
+
+**2. The absolute level moves, consistently, and by a lot. Answer: about 1.2
+places.** The board goes 4.37 → 5.58 and 5.57; pure ADP goes 4.37 → 5.14 and
+5.59. Both orderings, both fit scopes, land essentially on the coin flip.
+**Most of the ~1.1-place edge the backtest reports is an artifact of the
+gaussian field, not something either ordering earns against a room that drafts
+like this one.** HANDOFF has said since `df921da` that the edge lives in the
+pick policy rather than the projections; this says the pick policy's edge is
+largely against gaussian opponents.
+
+That second result is the one worth acting on, and it is not a valuation
+problem — swapping the valuation is exactly what finding 1 says does nothing
+here.
+
+### How much to believe it
+
+- **The shipping fit each fold sees is one 8-team draft.** `fit_scope: prior`
+  means every scorable fold (2022–2025) fits on the 2021 draft alone: 120 picks,
+  a different league size, half a different room. That is leakage-clean and it
+  is thin, and the two fit scopes disagreeing on the gap is exactly what being
+  that thin looks like. The K/DEF tendencies replicate across both drafts, and
+  those dominate the field's behaviour, which is why the *level* result is
+  stable while the *gap* result is not.
+- **Four folds, and they swing hard.** 2024 goes −1.40 → +3.38 → +2.15 on
+  changes that touch nobody's valuation. The direction of the level shift is
+  real; none of the per-fold numbers should be read as a quantity.
+- **The fitted field is *less* dispersed than the real one** (realized delta sd:
+  WR 6.9 vs the league's 15.4, DEF 8.4 vs 19.3). A more predictable field should
+  help a drafter whose lookahead is right and hurt one whose lookahead is wrong,
+  so this probably *overstates* the level damage.
+- **`ValueDrafter.survivors()` was deliberately left alone.** It still assumes
+  the field drafts straight down ADP, which against the fitted field is now a
+  known-wrong assumption — and it is the most likely single cause of the level
+  drop. Keeping it fixed is what makes these a comparison of fields rather than
+  of two different drafters. It is the obvious next experiment, below.
+
+### Next
+
+1. **Teach `survivors()` the fitted field and re-measure.** The policy's
+   lookahead is the mechanism the whole edge runs through, and against this
+   league it is currently mis-specified: it assumes the room takes the top
+   `picks_until_next` by ADP, and the room demonstrably does not. This is the
+   change most likely to recover the 1.2 places, and unlike everything in
+   finding 1 it is not a valuation change. It *is* a policy change, so it also
+   moves what `src/draft/monitor.py` recommends live — measure before shipping,
+   and expect the four-fold noise floor to make it hard to prove.
+2. **Do not re-record the baseline under the league field.** The fixture guards
+   the valuation and is measured under the gaussian field;
+   `check_backtest_baseline --write --opponent league` refuses for that reason.
+3. **`opponent_model.model` still ships as `gaussian`.** Nothing about the
+   default run changed — verified bit-for-bit, and the parity guard passes.
+4. **A third draft would help more than any modelling here.** The gap result
+   flipped sign on one extra draft. `data/league_history/` holds two;
+   `config/league.yaml` `excluded:` lists two more that were excluded as
+   novelty leagues, correctly. If earlier `Camden?` instances exist on Sleeper,
+   `scripts/build_league_history.py` will pull them.
+
 ---
 
 ## Next steps
@@ -307,6 +500,29 @@ it, validate on the 4,800-row sample, not on the backtest.
 
 ---
 
+## One failing test, and it is not this branch's
+
+`test_the_valuation_code_has_not_changed_under_the_baseline` fails. It hashes
+the AST of eight modules and compares against the fixture, and it reports **all
+eight** as moved — including `blend.py`, `calibration.py`, `vorp.py` and four
+others that nothing here touches.
+
+**It fails identically on an unmodified `main`.** `ast.dump` output changed
+between Python versions, and the fixture was recorded on 3.14 while this branch
+was developed on 3.12 (see Environment below). The tripwire is
+interpreter-sensitive, which is a real defect in it — a guard that fires on the
+Python you happen to be running teaches people to re-record without looking,
+which is exactly what its own docstring says it exists to prevent. Fixing it
+means hashing something version-stable (`ast.unparse` output, or the source with
+comments and docstrings stripped) and re-recording once. Left alone here because
+it is not what this branch is about, and because re-recording the fixture was
+explicitly out of scope.
+
+`draft_sim.py` would legitimately fire it in any case — it is fingerprinted and
+it changed. The other seven are what prove the cause is environmental.
+
+---
+
 ## Known limitations
 
 - **Four scorable folds, permanently.** ffverse preseason ECR starts 2021 and
@@ -317,8 +533,12 @@ it, validate on the 4,800-row sample, not on the backtest.
   can be scored against history. `weekly_update` says so in its own output.
 - **The lineup scorer is hindsight-optimal.** Applied identically to every
   simulated team, so comparisons are fair; absolute totals are an upper bound.
-- **Opponents draft ADP with gaussian noise.** Beating that field is not the
-  same as beating your league.
+- **The shipping field is still gaussian, and beating it is not the same as
+  beating your league** — now with a number attached rather than a worry. See
+  "The opponent model" above: swapping in a field fitted to this league's own
+  drafts costs the board 1.2 places and turns its tie with raw ADP into a
+  0.43-place loss. `--opponent league` runs it. The fitted field itself rests on
+  one prior 8-team draft per fold.
 - **FantasyPros draft projections are not obtainable** (top-10 server-rendered
   only). ECR through a rank curve is the substitute. Their *weekly* product does
   include real point projections.
@@ -337,6 +557,15 @@ better than this is a bug.
 
 Python 3.14.7. `nflreadpy` (not `nfl_data_py` — no 3.14 wheels), pandas 3,
 Polars→pandas at the ingest boundary. See `docs/environment.md`.
+
+The opponent-model work above was developed and measured on **Python 3.12**,
+which is why the AST fingerprint test fails (see "One failing test" above).
+Everything else reproduces: the gaussian field was verified bit-for-bit against
+a pre-change run, and `check_backtest_baseline` reports `parity holds` there.
+Note that 3.13+ enables `ssl.VERIFY_X509_STRICT` by default, which some
+corporate/proxy TLS chains fail — if `nflreadpy` starts raising
+`CERTIFICATE_VERIFY_FAILED` behind a proxy, that is the reason, not the data
+source.
 
 ```bash
 python -m venv .venv
