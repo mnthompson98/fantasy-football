@@ -372,6 +372,23 @@ def test_live_html_survives_an_empty_draft(board, tmp_path):
     assert "const DRAFTED = new Set([])" in path.read_text(encoding="utf-8")
 
 
+def test_the_live_board_auto_reloads_in_an_already_open_tab(board, tmp_path):
+    """The file on disk was rewritten every pick and nothing told a browser
+    tab already open on it to look again — "constantly updating" was true of
+    the file, not of what you would actually see without a manual reload."""
+    path = refresh_html(board, tmp_path / "board.html", set())
+    assert 'http-equiv="refresh"' in path.read_text(encoding="utf-8")
+
+
+def test_the_thursday_build_does_not_auto_reload(board, tmp_path):
+    """A meta refresh is right for a page open all draft; it is a bug in a
+    board you might leave open for two days before the draft even starts."""
+    from src.draft.board import export
+    paths = export(board, tmp_path, meta={"teams": 10})
+    html = paths["html"].read_text(encoding="utf-8")
+    assert 'http-equiv="refresh"' not in html
+
+
 def test_defenses_reconcile_by_team_abbreviation(feed, board):
     """Sleeper keys team defenses by team code (`SEA`), not a numeric id. If the
     board ever moved to `DEF_SEA` for `player_id`, defenses would never come off
@@ -551,6 +568,94 @@ def test_a_mismatched_draft_id_gets_a_mock_path_and_a_note():
         current_draft_id="1389723592727461889")
     assert path.name == "draft_board.mock.html"
     assert note is not None and "1400268868273876992" in note
+
+
+# --------------------------------------------------------------------------
+# The most serious bug found in this file. `draft_state()` reused the display
+# value "picks until your turn" (correctly 0 the instant you are on the
+# clock) as the *drafter's* lookahead gap too. `ValueDrafter.survivors()`
+# treats <= 0 as "nobody else comes off the board before I pick again", so
+# every position's best-now and best-later collapsed to the same player, every
+# gain computed to zero, and the tiebreak fell back to raw VORP -- silently
+# resurrecting the exact "take the highest-VORP player regardless of
+# position" failure the whole drop-off policy exists to prevent, and it only
+# ever fired while a recommendation was actually live, i.e. every time it
+# mattered. Found by reconstructing a real mock draft pick by hand: the
+# monitor recommended a QB in round 2 that `ValueDrafter.choose()`, called
+# directly with the correct lookahead, disagreed with.
+# --------------------------------------------------------------------------
+
+def _lookahead_bug_fixture():
+    """A tiny board where raw VORP and the correct drop-off answer disagree.
+
+    QB Top has the highest VORP on the board but a deep bench behind him
+    (ADP 50, four filler QBs) -- nothing is lost by waiting. WR Top has lower
+    VORP but the *best* ADP on the board (1) with only one decent player
+    behind him (WR Second) -- he will not survive six more picks. Depth at
+    both positions is kept above `ValueDrafter.SCARCITY_FLOOR` (3) on purpose,
+    so the scarcity backstop does not preempt the comparison this fixture
+    exists to make.
+    """
+    rows = [
+        {"player_id": "qb_top", "player_name": "QB Top", "position": "QB",
+         "vorp": 55.0, "adp_rank": 50, "replacement_points": 100.0},
+        {"player_id": "wr_top", "player_name": "WR Top", "position": "WR",
+         "vorp": 50.0, "adp_rank": 1, "replacement_points": 100.0},
+        {"player_id": "wr_second", "player_name": "WR Second", "position": "WR",
+         "vorp": 10.0, "adp_rank": 60, "replacement_points": 100.0},
+    ]
+    for i in range(4):
+        rows.append({"player_id": f"qbf{i}", "player_name": f"QB Filler {i}",
+                     "position": "QB", "vorp": -5.0 - i,
+                     "adp_rank": 70 + i, "replacement_points": 100.0})
+        rows.append({"player_id": f"wrf{i}", "player_name": f"WR Filler {i}",
+                     "position": "WR", "vorp": -5.0 - i,
+                     "adp_rank": 65 + i, "replacement_points": 100.0})
+    for i, adp in enumerate([2, 3, 4, 5, 6], start=1):
+        rows.append({"player_id": f"fill{i}", "player_name": f"Fill {i}",
+                     "position": "RB", "vorp": 1.0, "adp_rank": adp,
+                     "replacement_points": 100.0})
+    return pd.DataFrame(rows)
+
+
+def test_the_drop_off_lookahead_disagrees_with_raw_vorp_when_it_should():
+    """Ground truth for the fixture above, independent of `draft_state()`:
+    the drafter itself must actually prefer WR once given the real gap."""
+    from src.backtest.draft_sim import Roster, ValueDrafter
+
+    board_ = _lookahead_bug_fixture()
+    roster = Roster(team_id=3, starters={"QB": 1, "WR": 2}, flex_slots=0,
+                    flex_eligible=(), bench_slots=12)
+    d = ValueDrafter(caps={"QB": 1})
+
+    buggy = d.choose(board_, roster, 15, 15, picks_until_next=0)
+    fixed = d.choose(board_, roster, 15, 15, picks_until_next=6)
+    assert board_.loc[buggy, "position"] == "QB"    # the bug's answer
+    assert board_.loc[fixed, "position"] == "WR"    # the correct answer
+
+
+def test_draft_state_uses_the_lookahead_not_the_on_the_clock_display_value():
+    """The regression test. `teams=4, my_slot=4` is engineered so slot 4's
+    turns land at picks 4 and 5 back-to-back, then not again until pick 12 --
+    the display value ("0 picks until your turn") and the correct lookahead
+    (6, the real gap to pick 12) are forced to disagree, which is exactly the
+    situation the bug collapsed onto every live "on the clock" recommendation.
+    """
+    board_ = _lookahead_bug_fixture()
+    shape = LeagueShape(teams=4, starters={"QB": 1, "WR": 2}, flex_slots=0,
+                        flex_eligible=())
+    picks = [{"pick_no": i, "draft_slot": 1, "player_id": f"x{i}",
+             "metadata": {"position": "RB", "first_name": "X",
+                          "last_name": str(i)}} for i in range(1, 5)]
+
+    state = draft_state(picks, board_, my_slot=4, teams=4, rounds=15,
+                        shape=shape, caps={"QB": 1})
+
+    assert state.until_my_turn == 0          # display: correctly "you're up"
+    assert state.mine is True
+    assert state.recommendation["position"] == "WR", (
+        "the recommendation regressed to raw-VORP QB -- the drafter's "
+        "lookahead is being fed the display value again")
 
 
 def test_no_configured_draft_id_defaults_to_the_safe_path():

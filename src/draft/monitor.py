@@ -155,6 +155,21 @@ def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
     more_turns = made + 1 + until <= total
     roster = _roster_for(picks, my_slot, board, shape, rounds)
 
+    # The lookahead the *drafter* needs is not `until`. `until` answers "how
+    # many picks before my turn", which is correctly 0 the instant you are on
+    # the clock — exactly the moment `until` used to get reused as the gap fed
+    # into `ValueDrafter.choose()`. `choose()` treats <= 0 as "nobody more is
+    # coming off the board", so `survivors()` returned the whole pool
+    # unfiltered, the drop-off between every position's best-now and
+    # best-later collapsed to zero, and the tiebreak fell back to raw VORP —
+    # reintroducing the exact "backup QB by raw VORP" failure the drop-off
+    # policy exists to prevent, on every single pick that mattered, because it
+    # only fired while a recommendation was actually live. `simulate_draft`
+    # never has this bug: it always passes the gap from the pick *being
+    # decided* (`pick_no`, i.e. `made + 1` here), never from picks already
+    # completed. This computes the same thing the backtest does.
+    lookahead = picks_until_next_turn(made + 1, teams, my_slot)
+
     runs = positional_run([
         {"position": (p.get("metadata") or {}).get("position")}
         for p in sorted(picks, key=lambda x: x.get("pick_no") or 0)
@@ -179,7 +194,7 @@ def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
         drafter = ValueDrafter(caps=caps)
         try:
             idx = drafter.choose(available, roster, rounds, picks_remaining,
-                                 until)
+                                 lookahead)
             state.recommendation = available.loc[idx]
         except (ValueError, KeyError):
             # A recommendation is a nicety; the board is the deliverable. Never

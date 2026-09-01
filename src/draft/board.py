@@ -190,10 +190,22 @@ def _render_html(board: pd.DataFrame, meta: dict,
         f"{k}: {v}" for k, v in meta.items()
     ) or "value-based draft board"
 
+    # `drafted is not None` is exactly "this call came from the live monitor,
+    # not the Thursday build" — `export()` never passes `drafted` at all, and
+    # `refresh_html()` always passes a set (even an empty one, on the first
+    # poll). The file on disk was already being rewritten every pick; nothing
+    # in the page told an already-open browser tab to go look. A meta refresh
+    # is the whole fix — no server, no JS polling, works for a local file.
+    # Position filter and search reset on each reload, which is an acceptable
+    # cost against actually seeing who is still on the board.
+    refresh_tag = ('<meta http-equiv="refresh" content="6">'
+                   if drafted is not None else "")
+
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{refresh_tag}
 <title>Draft Board</title>
 <style>
   :root {{
