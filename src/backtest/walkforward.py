@@ -68,6 +68,14 @@ class BacktestConfig:
     # their opponents are not the same run, and a run record that cannot tell
     # them apart is the bug CLAUDE.md names.
     opponent: str = "gaussian"
+    # Which slot our side drafts from. None varies it per draft, which is what
+    # every recorded number was produced under and is right for a general
+    # question. Pin it to ask a question about one seat — slots 1 and `teams`
+    # are turn slots and behave differently from the eight in the middle.
+    my_slot: int | None = None
+    # "next_pick" or "next_exposed"; see `draft_sim.LOOKAHEAD_RULES`. Only
+    # affects turn slots.
+    lookahead_rule: str = "next_pick"
     value_col: str = "vorp"
     min_train_seasons: int = 2
     # None = expanding window (every season up to the purge gap). An integer
@@ -96,7 +104,8 @@ class BacktestConfig:
     # Only defaults are exempt, and only for fields that did not exist when the
     # fixture was recorded. `opponent="gaussian"` is the field the baseline was
     # measured under; `opponent="league"` changes the hash, which is the point.
-    _HASH_OMIT_WHEN_DEFAULT = {"opponent": "gaussian"}
+    _HASH_OMIT_WHEN_DEFAULT = {"opponent": "gaussian", "my_slot": None,
+                               "lookahead_rule": "next_pick"}
 
     def hash(self) -> str:
         payload = json.dumps(
@@ -192,7 +201,11 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
 
     for i in range(cfg.drafts_per_season):
         # Vary the draft slot so results are not an artifact of one position.
-        my_slot = int(rng.integers(1, cfg.teams + 1))
+        # Drawn even when pinned, so that pinning changes only the slot and not
+        # the seed sequence — two runs differing in `my_slot` alone then face
+        # the same opponents drawing in the same order.
+        drawn_slot = int(rng.integers(1, cfg.teams + 1))
+        my_slot = drawn_slot if cfg.my_slot is None else int(cfg.my_slot)
         seed = int(rng.integers(0, 2**31 - 1))
 
         rosters = simulate_draft(
@@ -203,6 +216,7 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
             need_boost=cfg.need_boost, need_penalty=cfg.need_penalty,
             value_col=cfg.value_col, seed=seed, caps=cfg.caps,
             opponent_factory=opponent_factory,
+            lookahead_rule=cfg.lookahead_rule,
         )
 
         my_team = my_slot - 1

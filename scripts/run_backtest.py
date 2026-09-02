@@ -54,12 +54,22 @@ CONFIG = ROOT / "config" / "league.yaml"
 
 def backtest_config(cfg: dict, *, drafts: int | None = None,
                     seasons: list[int] | None = None,
-                    opponent: str | None = None) -> BacktestConfig:
+                    opponent: str | None = None,
+                    my_slot: int | None = None,
+                    lookahead: str | None = None) -> BacktestConfig:
     bt = cfg["backtest"]
     shape = LeagueShape.from_config(cfg)
     opp = bt.get("opponent_model", {})
     return BacktestConfig(
         opponent=str(opponent or opp.get("model", "gaussian")),
+        my_slot=my_slot,
+        # Config, not a literal default: the live monitor reads the same key,
+        # and a rule hardcoded here would let the backtest score a pick policy
+        # nobody drafts with.
+        lookahead_rule=str(
+            lookahead
+            or cfg.get("draft_policy", {}).get("lookahead_rule")
+            or "next_pick"),
         seasons=seasons or [int(s) for s in bt["seasons"]],
         purge_gap=int(bt.get("purge_gap_seasons", 1)),
         max_train_seasons=bt.get("max_train_seasons") or None,
@@ -184,7 +194,9 @@ def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
              drafts: int | None = None, seasons: list[int] | None = None,
              label: str = "", refresh: bool = False, verbose: bool = True,
              output_dir: Path | None = None,
-             opponent: str | None = None) -> dict[str, pd.DataFrame]:
+             opponent: str | None = None,
+             my_slot: int | None = None,
+             lookahead: str | None = None) -> dict[str, pd.DataFrame]:
     """Run the walk-forward once per `value_col`, sharing the loaded history.
 
     Factored out of `main` so the parity check
@@ -199,7 +211,8 @@ def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
     if verbose:
         print("\nscoring history and building the crosswalk...")
     base = backtest_config(cfg, drafts=drafts, seasons=seasons,
-                           opponent=opponent)
+                           opponent=opponent, my_slot=my_slot,
+                           lookahead=lookahead)
     crosswalk = build_crosswalk(nv.load_ff_playerids(refresh=refresh))
     weekly = H.scored_weekly(base.seasons, scoring, refresh=refresh)
     totals = H.season_totals_for(base.seasons, scoring)
@@ -225,7 +238,8 @@ def evaluate(cfg: dict, *, value_cols: tuple[str, ...] = ("vorp",),
     out: dict[str, pd.DataFrame] = {}
     for value_col in value_cols:
         bt_cfg = backtest_config(cfg, drafts=drafts, seasons=seasons,
-                                 opponent=opponent)
+                                 opponent=opponent, my_slot=my_slot,
+                                 lookahead=lookahead)
         bt_cfg.value_col = value_col
         if verbose:
             print(f"\nbuilding boards ({value_col})...")
@@ -264,13 +278,25 @@ def main() -> int:
                     help="the field to draft against: 'gaussian' (ADP plus "
                          "noise) or 'league' (fitted to this league's own "
                          "drafts). Default: backtest.opponent_model.model")
+    ap.add_argument("--my-slot", type=int, default=None,
+                    help="pin our draft slot instead of varying it per draft. "
+                         "Slots 1 and `teams` are turn slots and behave "
+                         "differently from the eight in the middle.")
+    ap.add_argument("--lookahead", default=None,
+                    choices=("next_pick", "next_exposed"),
+                    help="how far our side looks ahead when scoring drop-off. "
+                         "'next_pick' (default, what every recorded number was "
+                         "measured under) is 0 for the first of a back-to-back "
+                         "pair; 'next_exposed' skips past our own consecutive "
+                         "picks. Differs only at turn slots.")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     seasons = ([int(s) for s in args.seasons.split(",")]
                if args.seasons else None)
     bt_cfg = backtest_config(cfg, drafts=args.drafts, seasons=seasons,
-                             opponent=args.opponent)
+                             opponent=args.opponent, my_slot=args.my_slot,
+                             lookahead=args.lookahead)
     bt_cfg.value_col = args.value_col
 
     folds = build_folds(bt_cfg)
@@ -289,7 +315,8 @@ def main() -> int:
     summary = evaluate(cfg, value_cols=(args.value_col,), drafts=args.drafts,
                        seasons=seasons, label=args.label,
                        refresh=args.refresh,
-                       opponent=args.opponent)[args.value_col]
+                       opponent=args.opponent, my_slot=args.my_slot,
+                       lookahead=args.lookahead)[args.value_col]
 
     per_fold = summary[summary["season"] != "ALL"]
     agg = summary[summary["season"] == "ALL"].iloc[0]

@@ -52,9 +52,17 @@ current:
   previous_league_id: "1262443299793276928"
   draft_type: snake
   rounds: 16
-  # Draft order is not set yet (`draft_order: null`, no start_time). You cannot
-  # know `--my-slot` for the monitor until the commissioner sets it.
-  my_slot: null
+  # Announced by the commissioner out of band on 2026-09-02, ahead of Sleeper:
+  # the draft order is set and we are at slot 10 (last in a 10-team snake, so
+  # back-to-back picks at 10/11, 30/31, ... and an 18-pick wait between turns).
+  #
+  # Sleeper's `draft_order` is still null, so `monitor.run`'s cross-check
+  # (which refuses a slot Sleeper disagrees with) cannot fire yet and this
+  # number is UNVERIFIED. It becomes verified for free the moment the
+  # commissioner saves the order — the monitor will raise on a mismatch.
+  #
+  # `--my-slot` defaults to this, so draft day does not depend on typing it.
+  my_slot: 10
 
 verified:
   # Promoted from `assumed_2026` once the 2026 league existed and agreed.
@@ -277,6 +285,46 @@ draft_policy:
     TE: 2
     K: 1
     DEF: 1
+
+  # How far ahead the drop-off policy looks when it asks "who survives to my
+  # next turn". Read by BOTH `src/draft/monitor.py` and `scripts/run_backtest.py`
+  # so the live board and the backtest cannot drift apart — the same invariant
+  # `src/features/pipeline.py` enforces for the valuation.
+  #
+  #   next_pick     our literal next turn.
+  #   next_exposed  the next turn opponents have actually picked before.
+  #
+  # They differ ONLY at a turn slot (1 and 10), and we draft from 10. A snake
+  # gives slot 10 back-to-back picks, so at picks 10, 30, 50 ... 150 the literal
+  # answer is 0 — nobody drafts in between. That correct 0 is poison for the
+  # policy: `ValueDrafter.survivors()` returns the pool unfiltered at <= 0, so
+  # every position's best-now and best-later are the same player, every
+  # candidate's drop-off is exactly 0.0, and the ranking falls through to its
+  # raw-VORP tiebreak. Raw VORP is the policy `ValueDrafter` was written to
+  # replace. It runs on half our picks.
+  #
+  # MEASURED, paired on the same board/seed/opponents, slot 10 pinned, 160
+  # drafts (`python -m scripts.compare_lookahead --my-slot 10 --drafts 40`):
+  #
+  #   metric               next_pick   next_exposed     diff       t
+  #   playoff pts             389.96         393.25    +3.28    1.32
+  #   season pts             2298.60        2297.99    -0.61   -0.07
+  #   win rate                  0.55           0.55    -0.01   -0.42
+  #   league rank               4.69           4.54    -0.15   -0.85
+  #
+  # Nothing reaches significance, and the only two folds that do point OPPOSITE
+  # ways and cancel: 2022 -1.27 (t=-2.74, better), 2024 +0.70 (t=+2.58, worse).
+  # That is the four-fold noise floor CLAUDE.md names, not a result.
+  #
+  # So this ships as `next_pick`: it is what every recorded number and
+  # `tests/fixtures/backtest_baseline.json` were measured under, and the
+  # measurement gives no reason to pay the cost of moving off it. The argument
+  # for `next_exposed` is correctness, not points — see HANDOFF.md. Flipping it
+  # is a PICK-POLICY change: it moves live recommendations AND invalidates the
+  # parity baseline (the fixture randomizes slots, 2 of 10 are turn slots), so
+  # it requires `python -m scripts.check_backtest_baseline` and a deliberate
+  # re-record. One line here, but not a free one.
+  lookahead_rule: next_pick
 
 # Consensus blend. Each component is z-scored within position, averaged, then
 # mapped back to points.

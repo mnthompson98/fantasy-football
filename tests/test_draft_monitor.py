@@ -761,3 +761,115 @@ def test_no_configured_draft_id_defaults_to_the_safe_path():
         draft_id="anything", current_draft_id=None)
     assert path.name == "draft_board.mock.html"
     assert note is not None
+
+
+# --- resolving our own draft slot -------------------------------------------
+#
+# `--my-slot` used to be required, so draft day depended on retyping a number
+# under time pressure — and a wrong slot is invisible until Sleeper publishes
+# `draft_order` (see `test_run_refuses_a_slot_sleeper_disagrees_with`).
+
+def test_the_flag_wins_when_given():
+    """Mocks and rehearsals are drafted from whatever slot they hand you."""
+    from src.draft.monitor import resolve_my_slot
+    assert resolve_my_slot(4, 10) == 4
+
+
+def test_the_configured_slot_is_used_when_the_flag_is_absent():
+    from src.draft.monitor import resolve_my_slot
+    assert resolve_my_slot(None, 10) == 10
+    assert resolve_my_slot(None, "10") == 10
+
+
+def test_an_unset_slot_is_an_error_not_a_guess():
+    """The same reasoning as `default_html_path`: no default is safe here, so
+    refuse rather than silently draft as somebody else."""
+    from src.draft.monitor import resolve_my_slot
+    with pytest.raises(ValueError, match="current.my_slot"):
+        resolve_my_slot(None, None)
+    with pytest.raises(ValueError, match="not a slot number"):
+        resolve_my_slot(None, "last")
+
+
+def test_the_configured_slot_is_the_one_the_commissioner_announced():
+    """Guards the checked-in value itself. Sleeper's `draft_order` is still
+    null for the 2026 draft, so `run`'s cross-check cannot fire and nothing
+    else would notice this being edited to the wrong number."""
+    import yaml
+    cfg = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "config" / "league.yaml")
+        .read_text(encoding="utf-8"))
+    slot = cfg["current"]["my_slot"]
+    assert slot == 10
+    assert 1 <= slot <= cfg["verified"]["teams"]
+
+
+def test_an_unconfirmed_slot_says_so_loudly(monkeypatch, feed, board, capsys):
+    """`--my-slot` is no longer required, so a config value can reach a mock
+    draft it does not describe. Sleeper's `draft_order` catches that only when
+    the order is drawn and lists us; when it cannot, the monitor must say the
+    slot is unverified rather than proceed quietly."""
+    M = _stub_draft(monkeypatch, feed, draft_order=None)
+    M.run("d", board, 4, expect_user_id="me", html_path=None,
+          slot_source="config")
+    out = capsys.readouterr().out
+    assert "config current.my_slot" in out
+    assert "NOT confirmed" in out
+    assert "someone else's roster" in out
+
+
+def test_a_confirmed_slot_does_not_cry_wolf(monkeypatch, feed, board, capsys):
+    """The warning has to be absent when the slot really was checked, or it
+    becomes noise that gets ignored on the one night it matters."""
+    M = _stub_draft(monkeypatch, feed, draft_order={"me": 4})
+    M.run("d", board, 4, expect_user_id="me", html_path=None,
+          slot_source="flag")
+    out = capsys.readouterr().out
+    assert "confirmed by Sleeper" in out
+    assert "NOT confirmed" not in out
+
+
+# --- the lookahead rule is one shared decision -------------------------------
+
+def test_the_monitor_and_the_backtest_read_the_same_lookahead_key():
+    """The invariant, asserted rather than trusted to a comment. A rule
+    hardcoded in one of the two means the backtest scores a pick policy nobody
+    drafts with — the pick-policy twin of the `features/pipeline.py` rule."""
+    import yaml
+    from scripts.run_backtest import backtest_config
+    cfg = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "config" / "league.yaml")
+        .read_text(encoding="utf-8"))
+    configured = cfg["draft_policy"]["lookahead_rule"]
+    assert backtest_config(cfg).lookahead_rule == configured
+
+
+def test_the_monitor_honours_the_configured_lookahead_rule(board):
+    """Slot 10 on the clock for its *first* pick of a back-to-back pair is the
+    only place the two rules can disagree, so it is where this is tested."""
+    from src.draft.monitor import draft_state
+
+    shape = LeagueShape(teams=10, starters={"QB": 1, "RB": 2, "WR": 2,
+                                            "TE": 1, "K": 1, "DEF": 1})
+    picks = [{"pick_no": i, "player_id": f"zzz{i}", "draft_slot": i,
+              "metadata": {}} for i in range(1, 10)]   # pick 10 is ours, next
+
+    kw = dict(my_slot=10, teams=10, rounds=16, shape=shape)
+    a = draft_state(picks, board, lookahead_rule="next_pick", **kw)
+    b = draft_state(picks, board, lookahead_rule="next_exposed", **kw)
+
+    assert a.mine and b.mine                      # both agree it is our turn
+    # Under next_pick nothing comes off the board before we pick again, so
+    # every drop-off collapses to zero and the raw-VORP tiebreak decides.
+    assert all(c.gain == 0.0 for c in a.candidates)
+    # Under next_exposed the real 18-pick wait is priced, so drop-off is live.
+    assert any(c.gain > 0.0 for c in b.candidates)
+
+
+def test_an_unknown_lookahead_rule_is_rejected_not_ignored(board):
+    from src.draft.monitor import draft_state
+    shape = LeagueShape(teams=10, starters={"QB": 1, "RB": 2, "WR": 2,
+                                            "TE": 1, "K": 1, "DEF": 1})
+    with pytest.raises(ValueError, match="unknown lookahead_rule"):
+        draft_state([], board, my_slot=10, teams=10, rounds=16, shape=shape,
+                    lookahead_rule="whatever")

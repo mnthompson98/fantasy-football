@@ -34,6 +34,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.backtest.draft_sim import (  # noqa: E402
+    LOOKAHEAD_RULES,
     Candidate,
     Roster,
     ValueDrafter,
@@ -52,7 +53,7 @@ CONFIG = ROOT / "config" / "league.yaml"
 # it from here. The implementation is the simulator's, so the live monitor and
 # the backtest can never disagree about whose turn it is.
 __all__ = ["picks_until_next_turn", "draft_state", "render", "run", "DraftState",
-           "scoring_mismatch", "default_html_path", "explain"]
+           "scoring_mismatch", "default_html_path", "explain", "resolve_my_slot"]
 
 # Sleeper's own vocabulary for a draft's scoring format, from `draft.metadata`.
 # This is frequently the *only* place a mock draft (`league_id: null`, no
@@ -142,8 +143,21 @@ def _roster_for(picks: list[dict], my_slot: int, board: pd.DataFrame,
 
 def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
                 teams: int, rounds: int, shape: LeagueShape,
-                caps: dict[str, int] | None = None) -> DraftState:
-    """Fold the raw picks feed into everything the display needs."""
+                caps: dict[str, int] | None = None,
+                lookahead_rule: str = "next_pick") -> DraftState:
+    """Fold the raw picks feed into everything the display needs.
+
+    `lookahead_rule` is `config draft_policy.lookahead_rule`, the same key
+    `scripts/run_backtest.py` reads. It must not become a literal here: the
+    monitor and the backtest running different pick policies is the failure
+    this module's own docstring exists to prevent.
+    """
+    try:
+        lookahead_for = LOOKAHEAD_RULES[lookahead_rule]
+    except KeyError:
+        raise ValueError(
+            f"unknown lookahead_rule {lookahead_rule!r}; "
+            f"expected one of {sorted(LOOKAHEAD_RULES)}") from None
     if not 1 <= my_slot <= teams:
         raise ValueError(f"my_slot {my_slot} is outside this draft's 1-{teams}")
     made = len(picks)
@@ -176,7 +190,7 @@ def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
     # never has this bug: it always passes the gap from the pick *being
     # decided* (`pick_no`, i.e. `made + 1` here), never from picks already
     # completed. This computes the same thing the backtest does.
-    lookahead = picks_until_next_turn(made + 1, teams, my_slot)
+    lookahead = lookahead_for(made + 1, teams, my_slot)
 
     runs = positional_run([
         {"position": (p.get("metadata") or {}).get("position")}
@@ -355,7 +369,8 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
         interval: float = 5.0, top_n: int = 8,
         shape: LeagueShape | None = None, caps: dict[str, int] | None = None,
         html_path: Path | None = None, expect_user_id: str | None = None,
-        board_meta: dict | None = None) -> None:
+        board_meta: dict | None = None, slot_source: str = "flag",
+        lookahead_rule: str = "next_pick") -> None:
     interval = max(MIN_POLL_S, interval)
 
     # Redirecting stdout to a file (or a task runner's log capture) switches
@@ -391,6 +406,30 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
             f"--my-slot {my_slot} disagrees with Sleeper: this draft has you "
             f"at slot {int(actual)}. Re-run with --my-slot {int(actual)}.")
 
+    # Say out loud where the slot came from and whether anyone checked it.
+    #
+    # This matters because `--my-slot` is no longer required: it falls back to
+    # `config current.my_slot`, which is right for the one draft the config
+    # describes and wrong for every mock. Sleeper's `draft_order` catches a
+    # wrong slot above — but only once the order is drawn AND we appear in it,
+    # and in a mock entered outside our own account we do not. That leaves a
+    # path where a config value silently drafts somebody else's roster, which
+    # is precisely the failure the required flag used to prevent by making you
+    # type the number. It cannot be prevented here, so it is made loud.
+    if actual is not None:
+        verdict = f"confirmed by Sleeper's draft_order"
+    elif order:
+        verdict = ("NOT confirmed — the order is drawn but does not list "
+                  f"user {expect_user_id or '?'}")
+    else:
+        verdict = "NOT confirmed — Sleeper has not drawn the order yet"
+    origin = ("--my-slot" if slot_source == "flag"
+              else "config current.my_slot")
+    print(f"slot {my_slot} from {origin}; {verdict}.")
+    if actual is None:
+        print("  ^ check this against the draft room before trusting a "
+              "recommendation. A wrong slot builds someone else's roster.")
+
     if shape is None:
         shape = LeagueShape(teams=teams,
                             starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1,
@@ -400,6 +439,10 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
 
     print(f"draft {draft_id} · {teams} teams · {rounds} rounds · "
           f"your slot {my_slot}")
+    if my_slot in (1, teams):
+        # Only a turn slot can tell the two rules apart, and this is one.
+        print(f"  turn slot: back-to-back picks · lookahead rule "
+              f"'{lookahead_rule}'")
     if caps:
         print("  caps: " + ", ".join(f"{k} {v}" for k, v in sorted(caps.items())))
     if html_path:
@@ -421,7 +464,8 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
             continue
 
         state = draft_state(picks, board, my_slot=my_slot, teams=teams,
-                            rounds=rounds, shape=shape, caps=caps)
+                            rounds=rounds, shape=shape, caps=caps,
+                            lookahead_rule=lookahead_rule)
 
         # `last is None` is the first poll. Print then even at zero picks —
         # otherwise a monitor started before the draft shows nothing at all,
@@ -475,10 +519,40 @@ def default_html_path(board_path: Path, *, draft_id: str,
     return mock_path, note
 
 
+def resolve_my_slot(flag: int | None, configured: object) -> int:
+    """Our draft slot, from `--my-slot` if given and `config current.my_slot`
+    otherwise.
+
+    The flag used to be required, which made draft day depend on retyping a
+    number correctly under time pressure. A wrong slot is the one input error
+    the monitor cannot detect on its own until Sleeper publishes `draft_order`
+    (see `run`) — it silently rebuilds somebody else's roster, applies our caps
+    to it, and advises confidently all night. Reading the checked-in value by
+    default means the number is fixed once, in a file, in advance.
+
+    The flag still wins when passed, because mocks and rehearsals are drafted
+    from whatever slot they hand you.
+    """
+    if flag is not None:
+        return int(flag)
+    if configured is None:
+        raise ValueError(
+            "no --my-slot given and config current.my_slot is null. Set the "
+            "slot in config/league.yaml or pass --my-slot.")
+    try:
+        return int(configured)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"config current.my_slot is {configured!r}, which is not a slot "
+            f"number. Fix it or pass --my-slot.") from None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Live Sleeper draft monitor")
     ap.add_argument("--draft-id", required=True)
-    ap.add_argument("--my-slot", type=int, required=True)
+    ap.add_argument("--my-slot", type=int, default=None,
+                    help="1-indexed draft slot. Default: config "
+                         "current.my_slot.")
     ap.add_argument("--board", default="outputs/projections/draft_board.parquet")
     ap.add_argument("--interval", type=float, default=5.0)
     ap.add_argument("--no-html", action="store_true",
@@ -514,12 +588,23 @@ def main() -> int:
     caps = None
     user_id = None
     current_draft_id = None
+    configured_slot = None
+    lookahead_rule = "next_pick"
     if CONFIG.exists():
         cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
         shape = LeagueShape.from_config(cfg)
         caps = (cfg.get("draft_policy", {}) or {}).get("position_caps") or None
         user_id = (cfg.get("user", {}) or {}).get("sleeper_user_id")
         current_draft_id = (cfg.get("current", {}) or {}).get("draft_id")
+        configured_slot = (cfg.get("current", {}) or {}).get("my_slot")
+        lookahead_rule = ((cfg.get("draft_policy", {}) or {})
+                          .get("lookahead_rule") or "next_pick")
+
+    try:
+        my_slot = resolve_my_slot(args.my_slot, configured_slot)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     if args.no_html:
         html_path = None
@@ -532,9 +617,11 @@ def main() -> int:
             print(f"note: {note}")
 
     try:
-        run(args.draft_id, board, args.my_slot, interval=args.interval,
+        run(args.draft_id, board, my_slot, interval=args.interval,
             shape=shape, caps=caps, html_path=html_path,
-            expect_user_id=user_id, board_meta=board_meta)
+            expect_user_id=user_id, board_meta=board_meta,
+            slot_source="flag" if args.my_slot is not None else "config",
+            lookahead_rule=lookahead_rule)
     except KeyboardInterrupt:
         print("\nstopped.")
     except ValueError as exc:

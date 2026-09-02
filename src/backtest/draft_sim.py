@@ -160,6 +160,56 @@ def picks_until_next_turn(pick_no: int, teams: int, my_slot: int) -> int:
     return 0
 
 
+def picks_until_board_moves(pick_no: int, teams: int, my_slot: int) -> int:
+    """Opponent picks between `pick_no` and the next turn the board has moved.
+
+    At the picks this is ever asked about — our own — it is identical to
+    `picks_until_next_turn` except at a **turn slot** (slot 1 and slot `teams`),
+    where a snake gives you two picks back to back. (The two functions disagree
+    at some picks belonging to other seats as well; those are never queried,
+    because only our own pick number is ever passed in.)
+
+    At a turn slot's first pick of a pair, `picks_until_next_turn` correctly
+    answers 0 — nobody drafts between
+    picks 10 and 11 — and that correct 0 is poison for the drop-off policy.
+    `ValueDrafter.survivors()` returns the pool unfiltered at <= 0, so at every
+    position the best-now and the best-later are the same player, every
+    candidate's `gain` computes to exactly 0.0, and the ranking falls through to
+    its raw-VORP tiebreak. That is the "take the highest VORP available" policy
+    `ValueDrafter` exists to replace, and from slot 10 it runs on half our picks
+    (10, 30, 50, ... 150).
+
+    Note this is a *different* bug from the on-the-clock lookahead fixed in
+    `src/draft/monitor.py`. That one fed a display value into the policy; the 0
+    was wrong. Here the 0 is right, and the policy is wrong to accept it — so
+    neither that fix nor its regression tests touch this.
+
+    Skipping over our own consecutive picks makes the horizon the one that
+    actually costs us something: what survives to the turn *after* the pair.
+    Taking the two best drop-offs measured against that horizon is the greedy
+    read of what is genuinely one joint decision over both picks.
+    """
+    nxt = int(pick_no)
+    limit = nxt + 2 * max(1, teams)      # a run of own picks cannot exceed this
+    while nxt <= limit:
+        gap = picks_until_next_turn(nxt, teams, my_slot)
+        if gap > 0:
+            return gap
+        nxt += 1                          # the very next pick is ours too
+    return 0
+
+
+# The two rules above, by name, for config and CLI plumbing. "next_pick" is
+# what every recorded number in HANDOFF.md and tests/fixtures/ was produced
+# under and is therefore the default; changing it is a pick-policy change and
+# must be measured on its own (CLAUDE.md, "survivors() was deliberately left
+# as it was").
+LOOKAHEAD_RULES = {
+    "next_pick": picks_until_next_turn,
+    "next_exposed": picks_until_board_moves,
+}
+
+
 class OpponentModel:
     """Samples opponent picks around ADP with positional-need adjustment."""
 
@@ -771,6 +821,7 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
                    value_col: str = "vorp", seed: int | None = None,
                    caps: dict[str, int] | None = None,
                    opponent_factory=None,
+                   lookahead_rule: str = "next_pick",
                    ) -> dict[int, Roster]:
     """Run one full snake draft.
 
@@ -784,9 +835,21 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
     order — so every number recorded before the model became swappable still
     reproduces bit-for-bit.
 
+    `lookahead_rule` picks how far ahead our side looks when scoring drop-off:
+    "next_pick" (our literal next turn, which is 0 for the first of a
+    back-to-back pair) or "next_exposed" (the next turn opponents have actually
+    picked before). They differ only at slots 1 and `teams`. See
+    `picks_until_board_moves`.
+
     Returns every team's roster so the scorer can compare ours against the
     league, not just measure ours in isolation.
     """
+    try:
+        lookahead_for = LOOKAHEAD_RULES[lookahead_rule]
+    except KeyError:
+        raise ValueError(
+            f"unknown lookahead_rule {lookahead_rule!r}; "
+            f"expected one of {sorted(LOOKAHEAD_RULES)}") from None
     required = {"player_id", "position", "adp_rank", value_col}
     missing = required - set(board.columns)
     if missing:
@@ -821,7 +884,7 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
         picks_remaining = roster_size - len(roster.picks)
         if team == my_team:
             idx = me.choose(available, roster, roster_size, picks_remaining,
-                            picks_until_next_turn(pick_no, teams, my_slot))
+                            lookahead_for(pick_no, teams, my_slot))
         else:
             idx = opponent.choose(available, roster)
 

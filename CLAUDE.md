@@ -273,6 +273,56 @@ depend on these. The league payload also carries a vestigial
   `tests/test_draft_monitor.py` force the display value and the correct
   lookahead to disagree and assert the recommendation follows the correct one.
 
+- **We draft from slot 10, which is a turn slot, and that breaks the drop-off
+  policy on half our picks.** A snake gives slot 10 back-to-back picks: 10, 11,
+  30, 31, ... 150, 151. At the *first* of each pair the literal answer to "how
+  many picks until my next turn" is 0, because nobody drafts in between. That 0
+  is **correct**, and it is poison: `ValueDrafter.survivors()` returns the pool
+  unfiltered at `<= 0`, so at every position the best-now and the best-later are
+  the same player, every candidate's `gain` computes to exactly 0.0, and the
+  ranking falls through to its raw-VORP tiebreak. Raw VORP is the policy
+  `ValueDrafter` was written to replace -- see its docstring for the roster it
+  builds. This runs on 8 of our 16 picks.
+
+  **This is a different bug from the on-the-clock lookahead** fixed in
+  `src/draft/monitor.py`, which fed a *display* value into the policy where the
+  0 was simply wrong. Here the 0 is right and the policy is wrong to accept it,
+  so neither that fix nor its two regression tests touch this. Do not conflate
+  them.
+
+  `draft_policy.lookahead_rule` selects the horizon:
+  `next_pick` (`picks_until_next_turn`) or `next_exposed`
+  (`picks_until_board_moves`, which skips past our own consecutive picks so the
+  horizon is the turn opponents have actually picked before). They differ only
+  at slots 1 and `teams`, and only at the picks we are ever asked about.
+
+  **The key is read by both `src/draft/monitor.py` and `scripts/run_backtest.py`,
+  for the same reason and with the same force as the pipeline rule.** A
+  hardcoded rule in one of them means the backtest scores a pick policy nobody
+  drafts with. `tests/test_draft_monitor.py` asserts the two read the same key.
+
+  **MEASURED and it changes nothing detectable.** Paired on the same board, seed
+  and opponents, slot 10 pinned, 160 drafts
+  (`python -m scripts.compare_lookahead --my-slot 10 --drafts 40`):
+  playoff points +3.28 (t=1.32), season points -0.61 (t=-0.07), win rate -0.01
+  (t=-0.42), league rank -0.15 (t=-0.85). Nothing reaches significance. The only
+  two folds that do point **opposite** ways and cancel: 2022 -1.27 (t=-2.74,
+  better) and 2024 +0.70 (t=+2.58, worse). This is the four-fold noise floor,
+  exactly as with the ADP comparison above -- one season eating another.
+
+  **So it ships as `next_pick`,** which is what every recorded number and
+  `tests/fixtures/backtest_baseline.json` were measured under. The argument for
+  `next_exposed` is correctness rather than points, and it is a real one: in the
+  slot-10 mock (`scripts/mock_draft.py`) `next_pick` takes QB Joe Burrow at pick
+  30, fourteen slots ahead of his ADP, on a 0.3-point VORP tiebreak over Omarion
+  Hampton; `next_exposed` takes Hampton at value and a quarterback at market in
+  round 7. That is the conclusion "the answer is not 'later', it is 'at market,
+  once'" reached by a different route. But the roster *shape* is unchanged over
+  100 mocks (RB 2.20 vs 2.16, WR 8.80 vs 8.84), and flipping the key moves live
+  recommendations **and** invalidates the parity fixture, which randomizes slots
+  and so includes turn slots 20% of the time. It is one config line and it costs
+  a `check_backtest_baseline` re-record. The manager's call, not the model's.
+
 - **`ValueDrafter.rank()` exposes the runner-up, not just the winner, without
   touching what actually gets picked.** `choose()` is now `rank(...)[0].index`
   — a pure extraction, verified by `test_choose_is_exactly_ranks_winner` and by

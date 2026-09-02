@@ -21,9 +21,10 @@ decisions-with-reasons. This file is state, progress and what to do next.
 # Build the board. Run again the morning of the draft.
 .venv/Scripts/python.exe -m scripts.build_draft_board --league-id 1389723592727461888 --refresh
 
-# During the draft. --my-slot is your draft position, 1-10. It is checked
-# against Sleeper's own draft_order and refuses to run if they disagree.
-.venv/Scripts/python.exe -m src.draft.monitor --draft-id 1389723592727461889 --my-slot <n>
+# During the draft. --my-slot defaults to config current.my_slot (10) and is
+# checked against Sleeper's own draft_order, refusing to run if they disagree.
+# Pass --my-slot only for a mock, where you will be at some other seat.
+.venv/Scripts/python.exe -m src.draft.monitor --draft-id 1389723592727461889
 
 # Rehearse the above against a real completed draft, at full speed.
 .venv/Scripts/python.exe -m scripts.replay_draft --draft-id 1262443300887994368 --my-slot 4
@@ -48,8 +49,14 @@ decisions-with-reasons. This file is state, progress and what to do next.
 Set `PYTHONIOENCODING=utf-8` first — Windows defaults to cp1252 and dies on the
 first accented player name.
 
-**You still do not know `--my-slot`.** The commissioner has not drawn the order
-(`draft_order: null`, no start time). Check Sleeper once it is up.
+**Your slot is 10**, announced by the commissioner out of band on 2026-09-02 and
+recorded at `config current.my_slot`. Sleeper still has `draft_order: null` and
+no start time, so the monitor's cross-check cannot confirm it yet and says so on
+startup. It confirms itself the moment the commissioner saves the order.
+
+Slot 10 is a **turn slot**: picks 10, 11, 30, 31, 50, 51 ... 150, 151 - pairs of
+back-to-back picks separated by an 18-pick wait. See "The turn-slot lookahead"
+below; it is the one thing about this seat that changes the pick policy.
 
 ### Outputs
 
@@ -408,21 +415,109 @@ here.
 
 ## Next steps
 
-### Before the draft
+### Draft day, start to finish
 
-1. ✅ **Three real Sleeper mocks run with the monitor attached**, start to
-   finish — see "The live draft path" above. Found and fixed a critical bug no
-   replay could have caught. Nothing further to prove here.
-2. **Get your draft slot** once the order is drawn; the monitor needs it. It
-   cross-checks the flag against Sleeper's `draft_order` and refuses to start on
-   a mismatch, so this is now a hard error rather than a silent wrong roster.
-3. **Rebuild the board that morning** with `--refresh`. ECR is the perishable
-   input.
-4. **Do not pass `--html`.** The default now does the right thing on its own:
-   `--draft-id 1389723592727461889` matches `config.current.draft_id`, so it
-   writes straight to the real `draft_board.html` — the file to have open on
-   your phone. Passing `--draft-id` for anything else (another mock, a typo)
-   automatically redirects to a sibling `*.mock.html` instead.
+Every command runs from the repo root in PowerShell. Set the encoding once per
+terminal or the first accented player name kills it:
+
+```powershell
+$env:PYTHONIOENCODING = "utf-8"
+```
+
+**The morning of**
+
+1. Confirm nothing moved under you:
+   `.venv\Scripts\python.exe -m scripts.verify_league_settings 1389723592727461888`
+   Expect "All 10 checked settings match."
+2. Open the Sleeper draft room and **read your slot off the board.** If it is
+   not 10, change `current.my_slot` in `config/league.yaml`. This is the one
+   input nothing can check for you until Sleeper publishes `draft_order`.
+3. Rebuild the board - ECR is the perishable input:
+   `.venv\Scripts\python.exe -m scripts.build_draft_board --league-id 1389723592727461888 --refresh`
+   Skim `outputs/projections/excluded_players.csv`. A top-40 name in there means
+   the injury gate caught something; a top-40 name in there *wrongly* is the
+   only failure that silently costs you a round.
+
+**Fifteen minutes before**
+
+4. Start the monitor. **Do not pass `--html` and do not pass `--my-slot`** -
+   both defaults are correct for this draft and wrong to retype under pressure:
+   `.venv\Scripts\python.exe -m src.draft.monitor --draft-id 1389723592727461889`
+5. **Read the first four lines before the draft starts.** They are the whole
+   pre-flight:
+   - `slot 10 from config current.my_slot; confirmed by Sleeper's draft_order.`
+     If it says **NOT confirmed**, the order is not up yet - re-check against the
+     room. If it *refuses to start*, Sleeper disagrees with you; believe Sleeper.
+   - `10 teams - 16 rounds - your slot 10`
+   - `turn slot: back-to-back picks - lookahead rule 'next_pick'`
+   - **No `SCORING MISMATCH` banner.** If one appears, the board is priced for a
+     different game than the room is playing and every VORP is wrong.
+
+**During**
+
+6. Act on `>> TAKE:` **only when the header says `YOU ARE ON THE CLOCK`.**
+   Before your turn the recommendation is a preview computed as if you were
+   picking right now, against a lookahead you do not actually face.
+7. Make the pick in the Sleeper app. The monitor sees it within 5 seconds and
+   reprints; you never tell it anything.
+8. Read `also considered:` - each alternative carries its own reasoning from the
+   same drop-off comparison that produced the winner. **There is no pick timer
+   this year, so this is free.** It is the biggest practical change: what the
+   system is worst at is knowing what you know about a player, and you now have
+   unlimited time to overrule it deliberately rather than in a panic.
+
+**If something breaks**
+
+- **Monitor crashes or you close it:** restart it. It holds no state - it
+  rebuilds your roster from the feed's `draft_slot` every poll.
+- **`[warn] poll failed`:** Sleeper hiccuped. It keeps polling; ignore it.
+- **You disagree with the board:** `outputs/projections/draft_board.csv` is the
+  same data, sortable, and the draft does not depend on the monitor at all.
+
+**The phone board (optional, needs setup in advance)**
+
+`outputs/projections/draft_board.html` is self-contained and the monitor
+rewrites it every pick with a 6-second meta-refresh. To read it on a phone,
+serve the directory over the LAN:
+
+```powershell
+.venv\Scripts\python.exe -m http.server 8000 --directory outputs\projections
+```
+
+then open `http://<laptop-LAN-IP>:8000/draft_board.html` on the phone.
+**This does not work out of the box here:** the Wi-Fi is classified as a
+*Public* network and there are no inbound firewall rules for Python, so the
+phone cannot reach the port. Fixing it means reclassifying the network as
+Private or adding an inbound rule - a deliberate security change, so make it
+and *test it from the phone* days before, never on draft night. With no pick
+timer the laptop terminal carries everything the HTML does; the phone board is
+a convenience, not a requirement.
+
+### The turn-slot lookahead
+
+Slot 10 gets back-to-back picks, so at picks 10, 30, 50 ... 150 the literal
+answer to "how many picks until my next turn" is 0. `ValueDrafter.survivors()`
+returns the pool unfiltered at `<= 0`, so every candidate's drop-off computes to
+exactly 0.0 and the ranking falls through to its raw-VORP tiebreak - the policy
+`ValueDrafter` exists to replace, on half of our picks.
+
+`draft_policy.lookahead_rule` selects between `next_pick` (that behaviour) and
+`next_exposed` (`draft_sim.picks_until_board_moves`, which skips past our own
+consecutive picks). **It ships as `next_pick`** - see the config comment for the
+paired measurement, which found nothing at any conventional significance level
+and two folds significant in opposite directions.
+
+The case for flipping it is correctness, not points: at those eight picks the
+drop-off policy is not running. In the slot-10 mock it is the difference between
+taking QB Joe Burrow at pick 30 (14 slots ahead of his ADP, on a 0.3-point VORP
+tiebreak over Omarion Hampton) and taking Hampton at value with a quarterback at
+market in round 7 - which is what "the answer is not 'later', it is 'at market,
+once'" in CLAUDE.md already concluded by a different route.
+
+Flipping it is one config line, but not a free one: the monitor and the backtest
+read the same key on purpose, so it moves live recommendations *and* invalidates
+`tests/fixtures/backtest_baseline.json` (which randomizes slots, 2 of 10 being
+turn slots). It needs `check_backtest_baseline` and a deliberate re-record.
 
 ### After the draft
 
