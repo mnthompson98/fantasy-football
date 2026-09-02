@@ -164,10 +164,14 @@ def test_the_fingerprint_ignores_comments_but_not_code(tmp_path,
 def test_baseline_still_says_what_handoff_says(baseline):
     """HANDOFF.md's finding, asserted rather than remembered.
 
-    The board and the raw market finish within a fraction of a place of each
-    other across four folds; the board wins three of them and loses 2025 badly.
+    As recorded on 2026-09-02 under the shipping config (ECR-only blend,
+    `run_aware` on for both drafters): the board and the raw consensus
+    ordering finish within a tenth of a place of each other, the board
+    wins 2023 and 2024, and 2025 is still the fold it loses — by about a
+    place now rather than three. ADP still has the better playoff points.
     If a future edit makes this fixture disagree with that description, the
-    description in HANDOFF.md needs rewriting too — this test is the reminder.
+    description in HANDOFF.md needs rewriting too — this test is the
+    reminder, in either direction.
     """
     board = baseline["runs"]["vorp"]
     market = baseline["runs"]["adp_value"]
@@ -175,17 +179,18 @@ def test_baseline_still_says_what_handoff_says(baseline):
     gap = (board["all"]["league_rank_by_points"]
            - market["all"]["league_rank_by_points"])
     assert abs(gap) < 0.5, (
-        f"board and ADP no longer finish together (gap {gap:+.3f}); "
-        f"HANDOFF.md's 'same expected finish' claim needs revisiting")
+        f"board-vs-ADP gap is {gap:+.3f}; HANDOFF.md describes a tie")
 
     per_season = {
         s: board["seasons"][s]["league_rank_by_points"]
            - market["seasons"][s]["league_rank_by_points"]
         for s in SEASONS
     }
-    assert per_season["2025"] > 0, "2025 is the fold the board loses"
-    assert sum(1 for g in per_season.values() if g < 0) == 3, (
-        f"expected the board to win three folds and lose 2025: {per_season}")
+    assert per_season["2025"] == max(per_season.values()), (
+        f"2025 should be the fold the board loses worst: {per_season}")
+    assert per_season["2025"] > 0.5, f"2025 is no longer a loss: {per_season}"
+    assert board["all"]["playoff_points"] < market["all"]["playoff_points"], (
+        "ADP has had the better playoff points in every measurement so far")
 
 
 # --------------------------------------------------------------------------
@@ -202,7 +207,23 @@ def _shift(baseline: dict, col: str, delta: float, *,
     return out
 
 
+def _drift_only(problems: list[str]) -> list[str]:
+    """`compare()` reports two different things: drift against the fixture,
+    and the absolute floor against the market. An unchanged run has no
+    drift by definition; whether it clears the floor is a separate fact,
+    pinned by its own test below."""
+    return [p for p in problems if "not earning its place" not in p]
+
+
 def test_an_unchanged_run_reports_no_drift(baseline):
+    assert _drift_only(compare(deepcopy(baseline), baseline)) == []
+
+
+def test_the_recorded_board_clears_the_floor(baseline):
+    """The full blend recorded on 2026-09-01 trailed pure consensus by 0.56,
+    past `MAX_LOSS_TO_ADP`; the ECR-only blend recorded on 2026-09-02 does
+    not. `check_backtest_baseline` must therefore exit 0 on an unchanged
+    run, floor included."""
     assert compare(deepcopy(baseline), baseline) == []
 
 
@@ -215,7 +236,7 @@ def test_drift_in_the_parity_gap_is_caught(baseline):
 
 def test_a_move_inside_tolerance_is_allowed(baseline):
     ok = _shift(baseline, "vorp", TOLERANCE["parity_gap"] / 2)
-    assert compare(ok, baseline) == []
+    assert _drift_only(compare(ok, baseline)) == []
 
 
 def test_the_absolute_floor_fires_even_against_a_stale_baseline(baseline):

@@ -34,18 +34,49 @@ def _throttle() -> None:
     _last_call = time.monotonic()
 
 
-def _get(path: str, *, timeout: float = 15.0) -> Any:
+# Transient failures worth one more try: rate limiting, server errors, and
+# network timeouts. A 4xx other than 429 is a real answer and is not retried.
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 3
+
+
+def _get(path: str, *, timeout: float = 15.0,
+         attempts: int = _MAX_ATTEMPTS) -> Any:
     """GET a Sleeper endpoint. Returns parsed JSON, or None for an empty body.
 
     Sleeper returns `null` (not 404) for a valid-shaped request with no data —
     e.g. a user with no drafts in a season. Callers must handle None.
+
+    Retries with backoff on 429 / 5xx / timeouts, honouring `Retry-After`.
+    Three attempts is enough to ride out a hiccup and short enough that the
+    live draft poll (5s interval) still notices a real outage promptly.
     """
-    _throttle()
-    resp = requests.get(f"{BASE}/{path.lstrip('/')}", timeout=timeout)
-    resp.raise_for_status()
-    if not resp.content:
-        return None
-    return resp.json()
+    url = f"{BASE}/{path.lstrip('/')}"
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        _throttle()
+        try:
+            resp = requests.get(url, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+            if attempt == attempts:
+                raise
+            time.sleep(min(8.0, 0.5 * 2 ** attempt))
+            continue
+        if resp.status_code in _RETRY_STATUSES and attempt < attempts:
+            retry_after = resp.headers.get("Retry-After")
+            try:
+                wait = float(retry_after) if retry_after else 0.5 * 2 ** attempt
+            except ValueError:
+                wait = 0.5 * 2 ** attempt
+            time.sleep(min(8.0, wait))
+            continue
+        resp.raise_for_status()
+        if not resp.content:
+            return None
+        return resp.json()
+    raise RuntimeError(f"sleeper: {url} failed after {attempts} attempts") \
+        from last_exc
 
 
 def epoch_ms_to_iso(ms: int | None) -> str | None:
@@ -129,7 +160,13 @@ def get_players(sport: str = "nfl", cache_dir: Path | None = None,
     Sleeper's docs ask that this be called at most once per day. We cache to
     disk and only refetch past `max_age_hours`. Never call this mid-draft —
     load it before the draft starts.
+
+    A stale cache beats a failed pull, for the same reason `nflverse._cached`
+    says so: losing the board on draft morning because Sleeper is briefly
+    down is worse than a board built on yesterday's injury statuses. The
+    fallback is printed, never silent.
     """
+    cache: Path | None = None
     if cache_dir is not None:
         cache_dir = Path(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -139,9 +176,17 @@ def get_players(sport: str = "nfl", cache_dir: Path | None = None,
             if age_h < max_age_hours:
                 return json.loads(cache.read_text(encoding="utf-8"))
 
-    data = _get(f"players/{sport}") or {}
+    try:
+        data = _get(f"players/{sport}") or {}
+    except Exception as exc:
+        if cache is not None and cache.exists():
+            age_h = (time.time() - cache.stat().st_mtime) / 3600
+            print(f"  [warn] sleeper players: pull failed ({exc}); using "
+                  f"cache aged {age_h:.1f}h")
+            return json.loads(cache.read_text(encoding="utf-8"))
+        raise
 
-    if cache_dir is not None:
+    if cache is not None:
         cache.write_text(json.dumps(data), encoding="utf-8")
     return data
 

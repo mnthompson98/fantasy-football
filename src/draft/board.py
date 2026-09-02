@@ -20,6 +20,11 @@ from pathlib import Path
 
 import pandas as pd
 
+# The run detector lives with the pick policy now (`ValueDrafter.survivors`
+# consumes it, and the simulator has to compute the same number the monitor
+# shows); re-exported here because this is where callers found it.
+from ..backtest.draft_sim import positional_run  # noqa: F401
+
 # `player_id` is the *Sleeper* id, because that is what the live draft feed
 # returns and what the monitor matches on. `player_key` is the canonical
 # gsis-anchored id (src/ingest/player_ids.py) that everything else joins on.
@@ -39,6 +44,9 @@ BOARD_COLUMNS = [
     # shrunk toward his position. `durability_flag` fires only past ECR ~120,
     # where the consensus stops pricing it — see features/availability.py.
     "durability", "durability_seasons", "durability_flag",
+    # Best-case value if the most bullish expert is right, on the VORP
+    # scale. What `upside_tiebreak` ranks bench picks on.
+    "upside_vorp",
 ]
 
 
@@ -97,34 +105,6 @@ def best_available(board: pd.DataFrame, drafted_ids: set, *,
     return df.head(n)
 
 
-def positional_run(recent_picks: list[dict], window: int = 6,
-                   threshold: float = 0.5, min_picks: int = 3
-                   ) -> dict[str, float]:
-    """Detect a positional run in the last `window` picks.
-
-    Returns positions whose share of recent picks exceeds `threshold`. A run is
-    a reason to move a position up, not a reason to panic — the useful signal
-    is "the tier I want will be gone before my next pick", which the caller
-    checks against picks-until-next-turn.
-
-    `min_picks` exists because share-of-window is meaningless on a tiny sample.
-    Without it the monitor announced "run in progress: WR 100%" after the first
-    pick of the draft, every time, and a warning that fires on pick one is a
-    warning nobody reads by pick fifty.
-    """
-    if len(recent_picks) < min_picks:
-        return {}
-    recent = recent_picks[-window:]
-    counts: dict[str, int] = {}
-    for p in recent:
-        pos = p.get("position")
-        if pos:
-            counts[pos] = counts.get(pos, 0) + 1
-    return {
-        pos: c / len(recent)
-        for pos, c in counts.items()
-        if c / len(recent) >= threshold
-    }
 
 
 def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
@@ -158,7 +138,8 @@ def export(board: pd.DataFrame, out_dir: Path | str = "outputs/projections",
 
 
 def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
-                 *, meta: dict | None = None, candidates=None) -> Path:
+                 *, meta: dict | None = None, candidates=None,
+                 preview_pick: int | None = None) -> Path:
     """Rewrite the phone board with the live draft's picks struck through.
 
     The HTML shipped as a tap-to-strike sheet backed by localStorage, which is
@@ -182,13 +163,15 @@ def refresh_html(board: pd.DataFrame, path: Path | str, drafted: set,
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_render_html(board, meta or {}, drafted=drafted,
-                                 candidates=candidates),
+                                 candidates=candidates,
+                                 preview_pick=preview_pick),
                     encoding="utf-8")
     return path
 
 
 def _render_html(board: pd.DataFrame, meta: dict,
-                 *, drafted: set | None = None, candidates=None) -> str:
+                 *, drafted: set | None = None, candidates=None,
+                 preview_pick: int | None = None) -> str:
     """Self-contained, phone-readable board with position filtering and search."""
     records = board.fillna("").to_dict(orient="records")
     payload = json.dumps(records)
@@ -228,9 +211,11 @@ def _render_html(board: pd.DataFrame, meta: dict,
                 for a in rest
             )
             alt_html = f'<div class="rec-alts">{rows}</div>'
+        label = (f"Likely pick at your turn (#{preview_pick})"
+                 if preview_pick else "Suggested pick")
         rec_html = f"""
   <div class="rec">
-    <div class="rec-label">Suggested pick</div>
+    <div class="rec-label">{label}</div>
     <div class="rec-player"><span class="pos {top.position}">{top.position}</span> {top.player_name}</div>
     <div class="rec-stats">VORP {top.raw_value:.1f}</div>
     {top_reason}

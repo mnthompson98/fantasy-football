@@ -42,8 +42,12 @@ def _command() -> str:
     Scheduler does not inherit an interactive shell's environment, and without
     it the run dies on the first accented player name — which is exactly the
     kind of failure nobody notices until they need the report.
+
+    The `cd /d` is not optional. Task Scheduler starts every task in
+    System32, so without it `-m scripts.weekly_update` cannot import and the
+    job fails silently every Tuesday.
     """
-    return (f'cmd /c "set PYTHONIOENCODING=utf-8 && '
+    return (f'cmd /c "cd /d \"{ROOT}\" && set PYTHONIOENCODING=utf-8 && '
             f'\"{_python()}\" -m scripts.weekly_update"')
 
 
@@ -85,9 +89,8 @@ def main() -> int:
         print("\nDry run. Re-run with --install to register it.")
         return 0
 
-    # Task Scheduler runs with the working directory unset, so the task has to
-    # cd itself; `cmd /c` above handles that via the module invocation from
-    # ROOT, which we set explicitly here.
+    # `cwd=ROOT` here only affects this `schtasks /Create` call; the task
+    # itself gets its working directory from the `cd /d` in `_command()`.
     out = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
     print(f"\n{out.stdout.strip() or out.stderr.strip()}")
     if out.returncode == 0:

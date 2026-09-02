@@ -74,6 +74,11 @@ def _droppable(roster: pd.DataFrame, slots: LineupSlots, *,
     Cost is measured against the starting lineup, not against the player's own
     projection: a good player at a position you are three deep in costs nothing
     to lose, and a mediocre one plugging a hole costs a lot.
+
+    Every bench player costs exactly zero by that measure, so the tie-break
+    matters: among zero-cost players, drop the lowest projection. Without it
+    the suggestion was whichever bench player happened to sort first, which
+    could be your best handcuff.
     """
     rows = []
     for idx in roster.index:
@@ -83,8 +88,12 @@ def _droppable(roster: pd.DataFrame, slots: LineupSlots, *,
             "player_name": roster.at[idx, "player_name"],
             "position": roster.at[idx, "position"],
             "cost": value_of_dropping(roster, idx, slots, points_col=points_col),
+            "projection": pd.to_numeric(
+                pd.Series([roster.at[idx, points_col]]),
+                errors="coerce").fillna(0.0).iloc[0],
         })
-    return pd.DataFrame(rows).sort_values("cost")
+    return pd.DataFrame(rows).sort_values(["cost", "projection"],
+                                          kind="stable")
 
 
 def evaluate(roster: pd.DataFrame, candidates: pd.DataFrame,

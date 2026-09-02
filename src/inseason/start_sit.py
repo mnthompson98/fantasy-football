@@ -78,16 +78,12 @@ def close_calls(lineup: Lineup, slots: LineupSlots, *,
         pos = cand.get("position")
         if pos is None:
             continue
-        eligible = lineup.starters[
-            (lineup.starters["position"] == pos)
-            | ((lineup.starters["slot"] == "FLEX")
-               & (pos in slots.flex_eligible))
-        ]
+        # A bench player can displace a starter at his own position, or the
+        # flex if he is flex-eligible.
+        same_pos = lineup.starters["position"] == pos
         if pos in slots.flex_eligible:
-            eligible = lineup.starters[
-                (lineup.starters["position"] == pos)
-                | (lineup.starters["slot"] == "FLEX")
-            ]
+            same_pos = same_pos | (lineup.starters["slot"] == "FLEX")
+        eligible = lineup.starters[same_pos]
         if eligible.empty:
             continue
 

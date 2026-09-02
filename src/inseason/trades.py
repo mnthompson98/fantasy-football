@@ -7,13 +7,13 @@ sheet and an upgrade in your lineup if you start two receivers and are thin
 there.
 
 So a trade is scored the same way everything else in-season is — the change in
-the best legal starting lineup you can field, before and after. Two horizons,
-because they disagree and the disagreement is the interesting part:
+the best legal starting lineup you can field, before and after.
 
-- **Rest of season**, which is what most trades are about.
-- **Playoff weeks 15-17**, which is what actually decides the league and which
-  CLAUDE.md names as the primary metric. A player on bye in week 16, or on a
-  team that rests starters, is worth less than his season line suggests.
+**One horizon only: this week's projection.** A playoff-weeks horizon
+(weeks 15-17, the primary metric) would be the more interesting number, but
+the weekly FantasyPros feed carries no forward projections and no archive, so
+there is nothing to compute it from. It is not implemented; do not read a
+rest-of-season verdict into `TradeVerdict`.
 
 Depth is charged for honestly. Giving up your only backup at a position you
 start two of is a real cost even when he never starts, because one injury turns
@@ -28,9 +28,6 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from ..features.lineup import LineupSlots, lineup_points
-
-# Weeks that decide the league. From `verified.playoff_weeks`.
-DEFAULT_PLAYOFF_WEEKS = (15, 16, 17)
 
 # What a spare body at a started position is worth, as a fraction of his own
 # projection, purely as insurance. Not a measured number — see the module note

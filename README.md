@@ -29,7 +29,8 @@ Python 3.14 notes and package-version specifics: [`docs/environment.md`](docs/en
 ```
 config/league.yaml          league settings, backtest window, blend weights
 data/league_history/        generated: past drafts + standings + champions
-src/ingest/                 Sleeper API, nflverse, odds, weather
+src/ingest/                 Sleeper API, nflverse (lines and weather come from
+                            nflverse schedules; there is no odds or weather API)
 src/features/               VORP, consensus blend, calibration
 src/backtest/               leakage guard, draft sim, metrics, walk-forward
 src/draft/                  board construction + live monitor

@@ -53,12 +53,22 @@ def fit_slopes(history: pd.DataFrame,
                actual_col: str = "actual",
                position_col: str = "position",
                priors: dict[str, float] | None = None,
-               min_obs: int = MIN_OBS_FOR_FIT) -> dict[str, float]:
+               min_obs: int = MIN_OBS_FOR_FIT,
+               prior_weight: int = 0) -> dict[str, float]:
     """Re-estimate calibration slopes from realized projection/actual pairs.
 
     Regresses actual on projection within position; the fitted coefficient is
     the calibration slope. Positions with too few observations keep their prior
     rather than adopting a slope fit on noise.
+
+    `prior_weight` shrinks the fitted slope toward the prior as if the prior
+    were worth that many observations: `(n * fit + w * prior) / (n + w)`.
+    Measured leave-one-season-out on 2021-2025 (top 40 per position), a
+    slope fit on the other four seasons predicted no better than the
+    published priors at any position but DEF, while the single-season fits
+    swung from 0.50 to 1.14 at RB. A fold whose whole history is one season
+    of 40 pairs should not overwrite the prior with that; with `w = 80` it
+    keeps a third of it, and a full five-season fit keeps ~70% of itself.
 
     `history` should be as-of-that-week projections paired with realized points —
     never end-of-season projections, which would be leakage.
@@ -68,7 +78,8 @@ def fit_slopes(history: pd.DataFrame,
 
     for pos, grp in history.groupby(position_col):
         grp = grp[[projection_col, actual_col]].dropna()
-        if len(grp) < min_obs:
+        n = len(grp)
+        if n < min_obs:
             continue
         x = grp[projection_col].to_numpy(dtype=float)
         y = grp[actual_col].to_numpy(dtype=float)
@@ -79,6 +90,10 @@ def fit_slopes(history: pd.DataFrame,
         slope = float((xc * (y - y.mean())).sum() / denom)
         # Clamp: a slope outside this range means something upstream is broken,
         # not that the projections are that miscalibrated.
-        fitted[pos] = float(np.clip(slope, 0.3, 1.2))
+        slope = float(np.clip(slope, 0.3, 1.2))
+        prior = priors.get(pos)
+        if prior_weight > 0 and prior is not None and np.isfinite(prior):
+            slope = (n * slope + prior_weight * float(prior)) / (n + prior_weight)
+        fitted[pos] = slope
 
     return fitted

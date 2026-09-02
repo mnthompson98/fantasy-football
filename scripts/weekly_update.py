@@ -91,6 +91,40 @@ def check_ingestion(cfg: dict, cw, *, refresh: bool = False) -> int:
     return problems
 
 
+def _current_week(season: int) -> int | None:
+    """The NFL week about to be played, or None before kickoff.
+
+    nflverse keeps the calendar; asking it beats inferring the week from
+    whichever data source happens to have updated last.
+    """
+    try:
+        import nflreadpy as nfl
+        if int(nfl.get_current_season()) != int(season):
+            return None                       # preseason of a new year
+        wk = int(nfl.get_current_week())
+        return wk if 1 <= wk <= 18 else None
+    except Exception as exc:
+        print(f"  [warn] could not read the current week from nflverse: {exc}")
+        return None
+
+
+def _trending(cw, kind: str) -> dict[str, int]:
+    """Sleeper's trending adds/drops on `player_key`. Empty on failure: this
+    is colour, and a network blip here must not discard the lineup, waiver
+    and trade work that has already been done."""
+    try:
+        entries = get_trending(kind, limit=100)
+    except Exception as exc:
+        print(f"  [warn] trending {kind}s unavailable: {exc}")
+        return {}
+    out: dict[str, int] = {}
+    for entry in entries:
+        key = cw.resolve(sleeper_id=entry.get("player_id"))
+        if key:
+            out[key] = int(entry.get("count") or 0)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Weekly in-season update")
     ap.add_argument("--league-id", default=None)
@@ -100,7 +134,8 @@ def main() -> int:
     ap.add_argument("--waiver-threshold", type=float, default=None,
                     help="points a claim must add before it is worth priority")
     ap.add_argument("--week", type=int, default=None,
-                    help="NFL week (default: latest with an injury report)")
+                    help="NFL week being decided (default: nflverse's current "
+                         "week, i.e. the upcoming one)")
     ap.add_argument("--out", default="outputs/reports",
                     help="where to write the markdown report")
     args = ap.parse_args()
@@ -137,18 +172,30 @@ def main() -> int:
 
     roster = attach_projections(state.my_roster, proj)
 
+    # The week being *decided* is the upcoming one. It used to be inferred
+    # from the latest injury report, which on a Tuesday night is last week's:
+    # the report was titled with the week just played, overwrote that week's
+    # file, and pulled game context for games already over. nflverse's own
+    # calendar says which week is next; the season comes from config so the
+    # 2025-vs-2026 flip in early September cannot move it either.
+    season = int(current.get("season") or nv._current_season())
+    week = args.week if args.week is not None else _current_week(season)
+
     # The official weekly injury report is the in-season authority. Sleeper's
     # season-long designations (IR, PUP) still gate on top of it — the two
-    # sources cover different things and neither replaces the other.
-    season = nv._current_season()
-    inj = weekly_report(season, args.week)
-    week = args.week
-    if week is None and not inj.empty:
-        week = int(inj["report_week"].max())
+    # sources cover different things and neither replaces the other. The
+    # report for the coming week fills in Wednesday-Friday; before that, the
+    # latest one available is the best there is, and it is labelled as such.
+    inj = weekly_report(season, week)
+    if inj.empty and week:
+        inj = weekly_report(season, None)
     if not inj.empty:
         roster = apply_to_roster(roster, inj)
         flagged = int((roster["concern"] != "clear").sum())
-        print(f"  injury report: week {week} · {len(inj)} listed · "
+        rep_week = int(inj["report_week"].max())
+        stale = f" (week {rep_week} report; week {week}'s not published yet)" \
+            if rep_week != week else ""
+        print(f"  injury report: week {week}{stale} · {len(inj)} listed · "
               f"{flagged} on your roster")
     else:
         print("  injury report: none published yet (preseason)")
@@ -180,21 +227,13 @@ def main() -> int:
     print(f"\n{'=' * 62}\nWAIVERS  (rolling priority — a claim costs your place)\n{'=' * 62}")
     universe = proj[proj["position"].isin(("QB", "RB", "WR", "TE", "K", "DEF"))]
     available = state.free_agents(universe)
-    trending = {}
-    for entry in get_trending("add", limit=100):
-        key = cw.resolve(sleeper_id=entry.get("player_id"))
-        if key:
-            trending[key] = int(entry.get("count") or 0)
+    trending = _trending(cw, "add")
 
     # Drops are the other half of the plan's "trending adds/drops". They are not
     # a waiver signal — a player being dropped everywhere is available, not
     # good. They are a *trade* signal: the leagues giving up on him are telling
     # you where the buy-low is, if you disagree with them.
-    dropped = {}
-    for entry in get_trending("drop", limit=100):
-        key = cw.resolve(sleeper_id=entry.get("player_id"))
-        if key:
-            dropped[key] = int(entry.get("count") or 0)
+    dropped = _trending(cw, "drop")
 
     threshold = args.waiver_threshold
     if threshold is None:
