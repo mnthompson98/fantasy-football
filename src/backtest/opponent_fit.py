@@ -59,6 +59,7 @@ from .draft_sim import (
     TAIL_SLOPE_ROUNDS_PER_K,
     LeagueTendencies,
     Roster,
+    canonical_order,
     snake_order,
 )
 
@@ -423,7 +424,7 @@ def simulate_field(board: pd.DataFrame, *, teams: int, rounds: int,
         for t in range(teams)
     }
 
-    available = board
+    available = canonical_order(board)
     picked: list[dict] = []
     for pick_no, team in enumerate(snake_order(teams, rounds), start=1):
         if available.empty:

@@ -46,7 +46,11 @@ def weekly_report(season: int, week: int | None = None, *,
         raw = nv.load_injuries([int(season)], refresh=refresh)
     except Exception as exc:
         # Before week 1 there is no report at all, and nflverse raises rather
-        # than returning empty. That is not an error condition for us.
+        # than returning empty. That is not an error condition for us — but
+        # a renamed column or a broken cache file is, and swallowing it as
+        # "preseason" would hide a real defect all season. Say what happened.
+        print(f"  [warn] injuries {season}: {type(exc).__name__}: {exc} "
+              f"(expected before week 1; investigate if in season)")
         return pd.DataFrame(columns=["player_key", "report_status",
                                      "practice_status", "injury", "report_week"])
 

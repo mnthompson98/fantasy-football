@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from .blend import blend_projections
@@ -170,6 +171,22 @@ def value_board(pool: pd.DataFrame, totals: pd.DataFrame, cfg: dict, *,
         # Anchoring changes the ordering, so the board has to be re-sorted.
         valued = valued.sort_values("vorp", ascending=False).reset_index(drop=True)
 
+    # `upside_vorp`: the best-case projection on the same VORP scale — the same
+    # affine calibration and persistence shrink the median got, less the same
+    # replacement level. Anchored positions keep their anchored VORP, or a
+    # kicker's unanchored upside would put him back in round six. Never
+    # below the median value: an optimist cannot make a player worse.
+    if "upside_points" in valued.columns:
+        means = valued.groupby("position")["projection"].transform("mean")
+        slope = valued.get("calibration_slope", pd.Series(1.0, index=valued.index))
+        factor = valued.get("persistence_shrink", pd.Series(1.0, index=valued.index))
+        up = means + (valued["upside_points"] - means) * slope.astype(float) \
+            * pd.to_numeric(factor, errors="coerce").fillna(1.0)
+        up_vorp = up - valued["replacement_points"]
+        anchored = valued.get("market_anchor", pd.Series(0.0, index=valued.index)) > 0
+        up_vorp = up_vorp.where(~anchored, valued["vorp"])
+        valued["upside_vorp"] = np.maximum(up_vorp.fillna(valued["vorp"]), valued["vorp"])
+
     return valued
 
 
@@ -189,6 +206,36 @@ def ecr_to_pool(ecr: pd.DataFrame, totals: pd.DataFrame,
 
     pool = ecr.copy()
     pool["ecr_points"] = curve.points_for_ranks(pool["position"], pool["pos_rank"])
+
+    # A position with no curve gets NaN for every player, the blend has no
+    # other component for K/DEF to fall back on, and NaN VORP walks silently
+    # through calibration and anchoring until `ValueDrafter.rank()` hits an
+    # all-NaN `idxmax` at the worst possible moment. Fail here, with the name.
+    dead = pool.groupby("position")["ecr_points"].apply(lambda s: s.isna().all())
+    if dead.any():
+        raise ValueError(
+            f"no rank curve for {sorted(dead[dead].index)} in train seasons "
+            f"{sorted(train_seasons)}: every player there would be valued NaN. "
+            f"Check that history for those positions scored at all.")
+
+    # The optimists' case. `ecr_best` is the highest overall rank any expert
+    # gave him; his positional rank in that world is the number of players at
+    # his position the consensus puts ahead of that, plus one. Mapped through
+    # the same curve, it is what he scores if the most bullish expert is
+    # right — the only upside signal on the board, and the one thing a
+    # median projection cannot say about a round-12 pick.
+    if "ecr_best" in pool.columns and "ecr" in pool.columns:
+        best = pd.to_numeric(pool["ecr_best"], errors="coerce")
+        cons = pd.to_numeric(pool["ecr"], errors="coerce")
+        pos_rank_best = pd.Series(np.nan, index=pool.index)
+        for pos, g in pool.groupby("position"):
+            ordered = np.sort(cons.loc[g.index].dropna().to_numpy())
+            b = best.loc[g.index].to_numpy(dtype=float)
+            r = np.searchsorted(ordered, b, side="left") + 1.0
+            r = np.where(np.isnan(b), g["pos_rank"].to_numpy(dtype=float), r)
+            pos_rank_best.loc[g.index] = np.minimum(r, g["pos_rank"].to_numpy(dtype=float))
+        pool["pos_rank_best"] = pos_rank_best
+        pool["upside_points"] = curve.points_for_ranks(pool["position"], pos_rank_best)
 
     prior = prior_season_rates(totals, prior_season)
     pool = pool.merge(prior, on="player_key", how="left")

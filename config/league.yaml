@@ -172,6 +172,13 @@ calibration:
     top_n: 40
     # Below this many (projection, actual) pairs for a position, keep the prior.
     min_obs: 40
+    # Shrink a fitted slope toward its prior as if the prior were this many
+    # pairs: (n * fit + w * prior) / (n + w). Measured leave-one-season-out on
+    # 2021-2025 (2026-09-01): fitted slopes predict no better than the priors
+    # out of sample at any position but DEF, and single-season RB fits range
+    # 0.50-1.14. The 2022 fold sees exactly one season (40 pairs), so without
+    # this it overwrites the prior with that season's noise. 80 = two seasons.
+    prior_weight: 80
 
   # A second, measured shrink for positions whose rank ordering does not persist
   # year to year. The rank curve is fit on finish rank, which assumes the
@@ -277,6 +284,33 @@ draft_policy:
     TE: 2
     K: 1
     DEF: 1
+  # Optional pick-policy switches, shared by the backtest and the live
+  # monitor so they can never run different policies. Both were measured
+  # against the 2025 draft replay and the walk-forward on 2026-09-01; see
+  # HANDOFF.md "Draft-day stress test" for the numbers before flipping either.
+  #
+  #   run_aware      — `survivors()` assumes a position being run on keeps
+  #                    going at its recent share of picks, instead of
+  #                    trusting ADP order (which was right 45% of the time
+  #                    against this room in 2025).
+  #   depth_tiebreak — once the starters are set every drop-off is zero and
+  #                    the tie-break is raw VORP, which recommended a second
+  #                    tight end at six consecutive turns of the 2025 replay.
+  #                    Weights bench candidates by the insurance they provide.
+  #   upside_tiebreak — a bench pick (drop-off zero) is ranked on the board's
+  #                    `upside_vorp` — the most bullish expert's rank through
+  #                    the curve — instead of the median. Late-round median
+  #                    projections are worthless by construction; the pick is
+  #                    buying the chance that the optimist is right.
+  # `run_aware` switched ON 2026-09-02: worth 0.3-0.45 places and 4-7
+  # playoff points against the field fitted to this league, and it costs
+  # about the same against the gaussian field (which never runs on a
+  # position, so the switch only ever removes survivors). A judgment that
+  # the fitted field is the one that looks like this room; it took Mayfield
+  # over Kittle in the 2025 replay. The other two stay off; neither helped.
+  run_aware: true
+  depth_tiebreak: false
+  upside_tiebreak: false
 
 # Consensus blend. Each component is z-scored within position, averaged, then
 # mapped back to points.
@@ -297,9 +331,18 @@ draft_policy:
 # and also where the blowups are.
 blend:
   components:
-    ecr_points: 2.0    # FantasyPros expert consensus rank -> points via rank curve
-    xfp_points: 0.5    # prior-season expected fantasy points, per-game, shrunk
-    prior_points: 0.5  # prior-season actual fantasy points, per-game, shrunk
+    ecr_points: 1.0    # FantasyPros expert consensus rank -> points via rank curve
+    # The two production components — prior-season expected points
+    # (`xfp_points`) and actual points (`prior_points`), each shrunk per-game
+    # — were switched OFF on 2026-09-02 after the walk-forward ablation
+    # (HANDOFF.md "Review, audit and draft-day stress test"): with them the
+    # board finished 4.91 against 4.35 for pure consensus, without them
+    # 4.25, and they cost 0.2-0.7 places in every configuration on both
+    # noise regimes. They are still computed and carried on the board for
+    # reference; give them a weight here to bring them back, and re-record
+    # the baseline when you do.
+    # xfp_points: 0.5
+    # prior_points: 0.5
   method: zscore_mean_within_position
 
   # FantasyPros no longer server-renders more than the top 10 rows of its

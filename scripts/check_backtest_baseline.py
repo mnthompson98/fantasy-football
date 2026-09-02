@@ -88,7 +88,11 @@ FINGERPRINTED = (
     "src/features/market_anchor.py",
     "src/features/slopes.py",
     "src/features/vorp.py",
+    "src/features/scoring.py",       # what "actual points" means
+    "src/ingest/history.py",         # the preseason window; the slope pairs
     "src/backtest/draft_sim.py",
+    "src/backtest/walkforward.py",   # fold construction; the scorer wiring
+    "src/backtest/metrics.py",       # the scorer
 )
 
 
@@ -122,8 +126,12 @@ def valuation_fingerprint() -> dict[str, str]:
     for rel in FINGERPRINTED:
         src = (ROOT / rel).read_text(encoding="utf-8")
         tree = _strip_docstrings(ast.parse(src))
+        # `ast.unparse`, not `ast.dump`: the dump format carries node field
+        # names that change between Python releases, so a fixture recorded on
+        # 3.14 fired on every module under 3.12 (HANDOFF.md). Unparsed source
+        # is stable across versions and still ignores comments and layout.
         out[rel] = hashlib.sha256(
-            ast.dump(tree).encode("utf-8")).hexdigest()[:16]
+            ast.unparse(tree).encode("utf-8")).hexdigest()[:16]
     return out
 
 

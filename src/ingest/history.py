@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..features.scoring import Scoring, score_defense, score_weekly
-from ..features.rank_curve import season_totals
+from ..features.rank_curve import FANTASY_WEEKS, season_totals
 from . import nflverse as nv
 from .player_ids import normalize_position, normalize_team, reconcile
 
@@ -86,10 +86,21 @@ def season_totals_for(seasons: list[int], scoring: Scoring, *,
 
 def opportunity_for(season: int, cw=None, *, refresh: bool = False
                     ) -> pd.DataFrame:
-    """ffopportunity expected points for one season, keyed canonically."""
+    """ffopportunity expected points for one season, keyed canonically.
+
+    Restricted to the fantasy weeks. The ffopportunity frame carries no
+    `season_type` column and runs through week 22, so without this a player
+    on a Super Bowl team contributed up to 21 games to a per-game rate that
+    `prior_points` measures over weeks 1-17 — a heavier shrink weight and a
+    rate diluted by week-18 rest, for exactly the players the board cares
+    most about.
+    """
     opp = nv.load_ff_opportunity([season], refresh=refresh)
     opp["position"] = opp["position"].map(normalize_position)
     opp = opp[opp["position"].isin(("QB", "RB", "WR", "TE"))].copy()
+    if "week" in opp.columns:
+        wk = pd.to_numeric(opp["week"], errors="coerce")
+        opp = opp[wk.isin(FANTASY_WEEKS)].copy()
     opp["player_key"] = opp["player_id"].astype("string")
     return opp
 
@@ -97,7 +108,9 @@ def opportunity_for(season: int, cw=None, *, refresh: bool = False
 def projection_actual_pairs(rankings: pd.DataFrame, totals: pd.DataFrame,
                             cw, seasons: list[int], *,
                             downweight: list[dict] | None = None,
-                            top_n: int = 40) -> pd.DataFrame:
+                            top_n: int = 40,
+                            blend_weights: dict[str, float] | None = None,
+                            opportunity_for=None) -> pd.DataFrame:
     """Preseason projections paired with what actually happened.
 
     For each season, fit the rank curve on *earlier* seasons only, project the
@@ -106,18 +119,38 @@ def projection_actual_pairs(rankings: pd.DataFrame, totals: pd.DataFrame,
     much of a position's projected spread actually materializes — replacing the
     generic priors with numbers from this league's own scoring.
 
+    **The projection is the one the slope will be applied to.** With
+    `blend_weights` given, each season's pairs go through `pipeline.ecr_to_pool`
+    and `blend_projections` exactly as the board does — prior-season rates and
+    expected points from `opportunity_for(season - 1)` included — so the slope
+    measures the blend's own spread. Fitting on the ECR-only curve and applying
+    the result to the blend measured a different estimator: a more accurate
+    projection has a slope closer to 1, so the blend was over-shrunk by
+    whatever the production components add. Without `blend_weights` this is
+    the ECR-only fit, kept for measurement and comparison.
+
     `top_n` restricts each position to the players you would plausibly draft.
     Including the whole pool measures something else: the deep tail is mostly
     "starters outscore backups", the pools differ in depth by position, and the
     slopes it produces differ from position to position in ways that vanish once
     you look only at draftable players.
 
+    A ranked player with no box-score rows that season scored zero and is
+    paired at zero — that is the honest survivorship treatment, since a camp
+    cut or a season-ending August injury is precisely the outcome a calibration
+    slope has to price. How many such pairs there are is carried in
+    `attrs["zero_actual"]` so a caller can print it; an identity miss would
+    look identical, and the count is how you would notice one.
+
     Seasons without a preseason ECR snapshot are skipped, so this returns pairs
     for 2021 onward regardless of what is asked for.
     """
+    from ..features.rank_curve import fit_rank_curve
+
     frames = []
+    zero_actual = 0
     for season in sorted(seasons):
-        train = [s for s in totals["season"].unique() if s < season]
+        train = sorted(int(s) for s in totals["season"].unique() if s < season)
         if not train:
             continue
         try:
@@ -125,24 +158,37 @@ def projection_actual_pairs(rankings: pd.DataFrame, totals: pd.DataFrame,
         except ValueError:
             continue  # no snapshot that year; 2020 and earlier
 
-        from ..features.rank_curve import fit_rank_curve
-        curve = fit_rank_curve(
-            totals[totals["season"].isin(train)], downweight=downweight)
-
-        sub = ecr[ecr["pos_rank"] <= top_n].copy()
-        sub["projection"] = curve.points_for_ranks(sub["position"], sub["pos_rank"])
+        train_totals = totals[totals["season"].isin(train)]
+        if blend_weights:
+            from ..features.blend import blend_projections
+            from ..features.pipeline import ecr_to_pool
+            prior = train[-1]
+            opp = (opportunity_for(prior) if opportunity_for is not None
+                   else pd.DataFrame())
+            pool = ecr_to_pool(ecr, train_totals, opp, prior_season=prior,
+                               train_seasons=train, downweight=downweight)
+            sub = blend_projections(pool, weights=blend_weights)
+            sub = sub[sub["pos_rank"] <= top_n].copy()
+        else:
+            curve = fit_rank_curve(train_totals, downweight=downweight)
+            sub = ecr[ecr["pos_rank"] <= top_n].copy()
+            sub["projection"] = curve.points_for_ranks(
+                sub["position"], sub["pos_rank"])
 
         realized = totals[totals["season"] == season].set_index("player_key")["points"]
-        sub["actual"] = sub["player_key"].map(realized).fillna(0.0)
+        sub["actual"] = sub["player_key"].map(realized)
+        zero_actual += int(sub["actual"].isna().sum())
+        sub["actual"] = sub["actual"].fillna(0.0)
         sub["season"] = season
         frames.append(sub[["season", "position", "player_key", "pos_rank",
                            "projection", "actual"]])
 
-    if not frames:
-        return pd.DataFrame(
-            columns=["season", "position", "player_key", "pos_rank",
-                     "projection", "actual"])
-    return pd.concat(frames, ignore_index=True)
+    cols = ["season", "position", "player_key", "pos_rank", "projection",
+            "actual"]
+    out = (pd.concat(frames, ignore_index=True) if frames
+           else pd.DataFrame(columns=cols))
+    out.attrs["zero_actual"] = zero_actual
+    return out
 
 
 def preseason_ecr(rankings: pd.DataFrame, season: int, cw, *,
