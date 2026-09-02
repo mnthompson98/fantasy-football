@@ -72,7 +72,10 @@ def blend_projections(df: pd.DataFrame,
     # Map z back to points using each position's own moments, taken from the
     # component with the widest coverage so the scale is stable.
     anchor = max(components, key=lambda c: df[c].notna().sum())
-    stats = out.groupby(position_col)[anchor].agg(["mean", "std"])
+    # ddof=0 to match `_zscore`; the groupby default of ddof=1 re-inflated the
+    # spread by sqrt(n / (n - 1)), ~1.6% at K/DEF pool sizes.
+    stats = out.groupby(position_col)[anchor].agg(
+        mean="mean", std=lambda s: s.std(ddof=0))
     out = out.join(stats, on=position_col, rsuffix="_anchor")
     out[out_col] = out["_z_blend"] * out["std"].fillna(0.0) + out["mean"].fillna(0.0)
 

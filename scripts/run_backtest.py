@@ -33,7 +33,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.backtest.draft_sim import league_opponent  # noqa: E402
+from src.backtest.draft_sim import league_opponent, policy_from_config  # noqa: E402
 from src.backtest.leakage_guard import (  # noqa: E402
     assert_no_future_seasons,
     assert_purge_gap,
@@ -52,14 +52,29 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "league.yaml"
 
 
+def policy_switches(cfg: dict) -> dict | None:
+    """See `draft_sim.policy_from_config`; the monitor uses the same parser."""
+    return policy_from_config(cfg.get("draft_policy"))
+
+
 def backtest_config(cfg: dict, *, drafts: int | None = None,
                     seasons: list[int] | None = None,
                     opponent: str | None = None,
                     my_slot: int | None = None,
                     lookahead: str | None = None) -> BacktestConfig:
     bt = cfg["backtest"]
+    ver = cfg["verified"]
     shape = LeagueShape.from_config(cfg)
     opp = bt.get("opponent_model", {})
+    # Rounds are the draft's, not the roster's: they diverge the day an IR
+    # slot is added. Playoff weeks come from the verified block so the primary
+    # metric follows the commissioner rather than a literal in metrics.py.
+    rounds = int((cfg.get("current") or {}).get("rounds")
+                 or ver.get("roster_size", 16))
+    playoff = tuple(int(w) for w in (ver.get("playoff_weeks")
+                                     or range(int(ver.get("playoff_week_start", 15)),
+                                              18)))
+    regular = tuple(range(1, min(playoff)))
     return BacktestConfig(
         opponent=str(opponent or opp.get("model", "gaussian")),
         my_slot=my_slot,
@@ -76,7 +91,9 @@ def backtest_config(cfg: dict, *, drafts: int | None = None,
         seed=int(bt.get("seed", 20260830)),
         drafts_per_season=drafts if drafts is not None else 40,
         teams=shape.teams,
-        rounds=int(cfg["verified"].get("roster_size", 16)),
+        rounds=rounds,
+        playoff_weeks=playoff,
+        regular_weeks=regular,
         starters=dict(shape.starters),
         flex_slots=shape.flex_slots,
         flex_eligible=tuple(shape.flex_eligible),
@@ -85,6 +102,7 @@ def backtest_config(cfg: dict, *, drafts: int | None = None,
         need_boost=float(opp.get("positional_need_boost", 1.6)),
         need_penalty=float(opp.get("positional_need_penalty", 0.4)),
         caps=(cfg.get("draft_policy", {}).get("position_caps") or None),
+        policy=policy_switches(cfg),
         valuation={
             "blend": cfg.get("blend", {}).get("components"),
             "calibration": cfg.get("calibration"),
@@ -127,10 +145,12 @@ def make_board_builder(cfg: dict, *, totals: pd.DataFrame,
         )
 
         # Slopes are fit on seasons strictly before this fold's target, which is
-        # what keeps them leakage-free. Early folds have only one season of
-        # preseason ECR to fit on and fall back to the config priors per
-        # position, which is the honest behaviour.
-        slopes = fitted_slopes(cfg, rankings, train_totals, crosswalk, train)
+        # what keeps them leakage-free, and through the same blend they are
+        # applied to. Early folds have only one season of preseason ECR to fit
+        # on and fall back to the config priors per position, which is the
+        # honest behaviour.
+        slopes = fitted_slopes(cfg, rankings, train_totals, crosswalk, train,
+                               opportunity_for=H.opportunity_for)
 
         board = value_board(pool, train_totals, cfg, slopes=slopes,
                             train_seasons=train, shape=shape)
@@ -147,6 +167,16 @@ def make_board_builder(cfg: dict, *, totals: pd.DataFrame,
         # correlations raise but cannot settle: does the projection pipeline
         # earn its keep, or is the edge coming from the pick policy alone?
         board["adp_value"] = -pd.to_numeric(board["adp_rank"], errors="coerce")
+        if bt_cfg.value_col == "adp_value":
+            # `ValueDrafter` puts a pick on a points scale as
+            # `value + replacement_points`. For the ADP ordering that mixed a
+            # rank with a per-position points offset (QB ~218, RB ~159,
+            # TE ~118), so the "pure market" baseline carried a hidden
+            # positional bias in every flex comparison. One constant for
+            # everyone keeps every effective value positive — filling an
+            # empty slot still beats leaving it empty — with no offset
+            # between positions.
+            board["replacement_points"] = float(len(board)) + 1.0
 
         if verbose:
             print(f"  {fold.target_season}: ECR {scrape_date} · "

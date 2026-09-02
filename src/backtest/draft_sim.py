@@ -142,6 +142,36 @@ def snake_order(teams: int, rounds: int) -> list[int]:
     return order
 
 
+def positional_run(recent_picks: list[dict], window: int = 6,
+                   threshold: float = 0.5, min_picks: int = 3
+                   ) -> dict[str, float]:
+    """Detect a positional run in the last `window` picks.
+
+    Returns positions whose share of recent picks exceeds `threshold`. Lives
+    here rather than in `draft.board` because the pick policy consumes it
+    (`ValueDrafter.survivors`) and the simulator has to compute the same
+    number the monitor does; `draft.board` re-exports it for its callers.
+
+    `min_picks` exists because share-of-window is meaningless on a tiny sample.
+    Without it the monitor announced "run in progress: WR 100%" after the first
+    pick of the draft, every time, and a warning that fires on pick one is a
+    warning nobody reads by pick fifty.
+    """
+    if len(recent_picks) < min_picks:
+        return {}
+    recent = recent_picks[-window:]
+    counts: dict[str, int] = {}
+    for p in recent:
+        pos = p.get("position")
+        if pos:
+            counts[pos] = counts.get(pos, 0) + 1
+    return {
+        pos: c / len(recent)
+        for pos, c in counts.items()
+        if c / len(recent) >= threshold
+    }
+
+
 def picks_until_next_turn(pick_no: int, teams: int, my_slot: int) -> int:
     """Picks between `pick_no` and this manager's next turn in a snake draft.
 
@@ -478,6 +508,7 @@ class Candidate:
     raw_value: float      # the board's own value_col (e.g. anchored VORP)
     reason: str
     forced: bool = False  # scarcity / end-of-draft backstop, not a real choice
+    upside: float = float("nan")   # board `upside_vorp`, if it carries one
 
 
 class ValueDrafter:
@@ -530,19 +561,45 @@ class ValueDrafter:
 
     # Beyond these, an extra body at the position cannot crack the lineup.
     # RB/WR are uncapped-ish because flex plus injury attrition makes depth real.
-    DEFAULT_CAPS = {"QB": 2, "TE": 2, "K": 1, "DEF": 2}
+    # These match `draft_policy.position_caps` in config/league.yaml — the
+    # manager's actual strategy — so a caller that passes no caps (the monitor
+    # on a checkout with no config) runs the same policy the backtest scored,
+    # not a looser one that allows a second QB and a second DEF.
+    DEFAULT_CAPS = {"QB": 1, "TE": 2, "K": 1, "DEF": 1}
 
     # If a position we still need a starter at drops to this few players, take
     # one now. Waiting for the end-of-draft backstop assumes the position will
     # still be there, and sometimes it isn't.
     SCARCITY_FLOOR = 3
 
+    # `depth_tiebreak` constants. Once the starters are set every candidate's
+    # drop-off is zero — nobody left improves *this* lineup — and the sort
+    # falls through to raw VORP, which happily takes a second tight end six
+    # turns running because his VORP edges a bench receiver's. A bench player
+    # is insurance: worth something in proportion to how many starters he
+    # covers and discounted for each body already ahead of him in that queue.
+    # Heuristic, not measured constants; the backtest scores the whole option.
+    BENCH_DECAY = 0.5
+
     def __init__(self, value_col: str = "vorp",
                  caps: dict[str, int] | None = None,
-                 scarcity_floor: int = SCARCITY_FLOOR):
+                 scarcity_floor: int = SCARCITY_FLOOR,
+                 run_aware: bool = False,
+                 depth_tiebreak: bool = False,
+                 upside_tiebreak: bool = False):
         self.value_col = value_col
         self.caps = caps if caps is not None else dict(self.DEFAULT_CAPS)
         self.scarcity_floor = scarcity_floor
+        # All default off: the recorded baseline and every number in
+        # HANDOFF.md were measured without them. `config: draft_policy`
+        # switches them on for the backtest and the monitor together.
+        self.run_aware = run_aware
+        self.depth_tiebreak = depth_tiebreak
+        # A bench pick (drop-off zero) is ranked on the board's `upside_vorp`
+        # — the best-case expert rank through the curve — instead of the
+        # median. A round-12 player's median projection is worthless by
+        # construction; what you are buying is the chance he is not.
+        self.upside_tiebreak = upside_tiebreak
 
     def _effective(self, row) -> float:
         """A player's value on a points scale.
@@ -607,31 +664,78 @@ class ValueDrafter:
         return (self.starting_value(roster, extra=(position, value))
                 - self.starting_value(roster))
 
-    def survivors(self, available: pd.DataFrame, picks_until_next: int
-                  ) -> pd.DataFrame:
+    def survivors(self, available: pd.DataFrame, picks_until_next: int,
+                  runs: dict[str, float] | None = None) -> pd.DataFrame:
         """Who is plausibly still on the board at our next turn.
 
         Opponents draft near ADP, so the next `picks_until_next` players off the
         board are approximately the top of the remaining ADP list. This is the
-        gaussian opponent model's assumption, minus the noise.
+        gaussian opponent model's assumption, minus the noise. Replayed against
+        this league's real 2025 draft it was right about 45% of the players it
+        named, which is the number to keep in mind when reading any drop-off.
 
-        It is deliberately **not** updated to match `LeagueOpponentModel`.
-        Teaching this the league's fitted biases would change the pick policy,
-        and the pick policy is where the whole measured edge lives (HANDOFF.md,
-        "What the edge actually is") — it is also shared with the live monitor,
-        so it would change what gets recommended on draft day. Swapping the
-        opponent model changes only the field; keeping this fixed is what makes
-        the two runs a comparison of fields rather than of two different
-        drafters. Aligning them is a separate, larger question, and it should be
-        measured on its own.
+        `runs` is `positional_run()`'s view of the last few picks. With
+        `run_aware` on, a position being run on is assumed to keep going at
+        its recent share of picks: if the room has taken four of the last six
+        at RB and there are six picks until our turn, four more RBs are
+        assumed gone even if ADP says two. Off, this is exactly the ADP list
+        and `runs` is ignored — the behaviour every recorded number was
+        measured under.
+
+        It is deliberately **not** taught `LeagueOpponentModel`'s fitted
+        curves. Swapping the opponent model changes only the field; keeping
+        this independent of it is what makes those runs a comparison of
+        fields rather than of two different drafters.
         """
         if picks_until_next <= 0:
             return available
-        return available.sort_values("adp_rank").iloc[picks_until_next:]
+        ordered = available.sort_values("adp_rank")
+        out = ordered.iloc[picks_until_next:]
+        if not self.run_aware or not runs:
+            return out
+        gone = ordered.iloc[:picks_until_next]
+        for pos, share in runs.items():
+            extra = int(round(float(share) * picks_until_next)) \
+                - int((gone["position"] == pos).sum())
+            if extra > 0:
+                idx = out[out["position"] == pos].index[:extra]
+                out = out.drop(index=idx)
+        return out
+
+    def _tiebreak(self, roster: Roster, position: str, raw_value: float,
+                  gain: float = 0.0, upside: float = float("nan")) -> float:
+        """Second sort key after drop-off. Raw anchored VORP by default.
+
+        With `upside_tiebreak`, a bench candidate (drop-off zero) sorts on
+        his best-case value instead of his median one; anything with a real
+        drop-off keeps its raw value, because there the pick is about now.
+
+        With `depth_tiebreak`, a candidate who would only be a backup is
+        weighted by the insurance he provides: `BENCH_DECAY ** k` for being
+        the k-th body behind the dedicated starters, times the number of
+        starters he covers. So a third running back (covers two starters,
+        first backup) keeps half his VORP; a second tight end (covers one,
+        first backup) keeps a quarter. Negative values — market-anchored K and
+        DEF — are left alone, or discounting them would *raise* them.
+        """
+        if (self.upside_tiebreak and gain <= 0 and upside == upside
+                and upside > raw_value):
+            raw_value = float(upside)
+        if not self.depth_tiebreak or raw_value <= 0:
+            return raw_value
+        starters = roster.starters.get(position, 0)
+        if starters <= 0:
+            return raw_value
+        have = roster.counts().get(position, 0)
+        k = have - starters + 1              # 1 = first backup
+        if k <= 0:
+            return raw_value
+        return raw_value * (self.BENCH_DECAY ** k) * starters
 
     def choose(self, available: pd.DataFrame, roster: Roster,
                roster_size: int, picks_remaining: int,
-               picks_until_next: int = 0) -> int:
+               picks_until_next: int = 0,
+               runs: dict[str, float] | None = None) -> int:
         """The single pick. A thin wrapper: `rank()` does the actual work and
         this returns its winner, so the two can never disagree with each
         other. Kept because every call site outside this module — the
@@ -639,11 +743,12 @@ class ValueDrafter:
         just the index, not the full breakdown.
         """
         return self.rank(available, roster, roster_size, picks_remaining,
-                         picks_until_next)[0].index
+                         picks_until_next, runs=runs)[0].index
 
     def rank(self, available: pd.DataFrame, roster: Roster,
             roster_size: int, picks_remaining: int,
-            picks_until_next: int = 0, *, top_n: int | None = None
+            picks_until_next: int = 0, *, top_n: int | None = None,
+            runs: dict[str, float] | None = None
             ) -> list["Candidate"]:
         """Every legal position's best player, ranked the same way `choose()`
         picks its winner — best first, each with why it landed where it did.
@@ -741,7 +846,7 @@ class ValueDrafter:
         #    marginal value is monotone in value within a position — so this
         #    costs a couple of lineup evaluations per position, not one per
         #    player.
-        left = self.survivors(df, picks_until_next)
+        left = self.survivors(df, picks_until_next, runs)
 
         candidates: list[Candidate] = []
         for pos, group in df.groupby("position", sort=False):
@@ -758,12 +863,19 @@ class ValueDrafter:
                 gain -= self.marginal_value(
                     roster, pos, self._effective(later_pool.loc[later_idx]))
 
+            upside = float("nan")
+            if "upside_vorp" in df.columns:
+                try:
+                    upside = float(df.at[idx, "upside_vorp"])
+                except (TypeError, ValueError):
+                    pass
             candidates.append(Candidate(
                 index=idx, position=pos,
                 player_name=str(df.at[idx, "player_name"]),
                 gain=gain, value=now,
                 raw_value=float(df.at[idx, self.value_col]),
                 reason=_drop_off_reason(pos, gain, later_name, picks_until_next),
+                upside=upside,
             ))
 
         if not candidates:
@@ -786,8 +898,46 @@ class ValueDrafter:
         # picks them up. `sorted` is stable, so a genuine tie keeps whichever
         # position `groupby` visited first — matching the manual max-loop
         # this replaced, which only overwrote its best-so-far on a strict `>`.
-        candidates.sort(key=lambda c: (c.gain, c.raw_value), reverse=True)
+        # With `depth_tiebreak` the second key is bench-weighted VORP; see
+        # `_tiebreak`. Off, it is `raw_value` exactly as before.
+        candidates.sort(
+            key=lambda c: (c.gain, self._tiebreak(roster, c.position, c.raw_value,
+                                                  c.gain, c.upside)),
+            reverse=True)
         return candidates[:top_n] if top_n else candidates
+
+
+POLICY_SWITCHES = ("run_aware", "depth_tiebreak", "upside_tiebreak")
+
+
+def policy_from_config(draft_policy: dict | None) -> dict | None:
+    """`ValueDrafter`'s optional switches from `config: draft_policy`.
+
+    None when every switch is off, so the recorded baseline's hash and the
+    default simulator path are untouched. One parser, used by the backtest
+    and the live monitor, so the two can never run different policies.
+    """
+    dp = draft_policy or {}
+    on = {k: True for k in POLICY_SWITCHES if dp.get(k)}
+    return on or None
+
+
+def canonical_order(board: pd.DataFrame) -> pd.DataFrame:
+    """The board in an order that does not depend on how it was valued.
+
+    `OpponentModel.choose` draws one gaussian per available player, in row
+    order, so a board sorted by VORP hands each player a *different* noise
+    draw than the same board sorted by ADP — and two runs that differ only in
+    `value_col` were never "same seed, only the ordering changed": the
+    2026-09-01 review found the identical pure-ADP drafter finishing 4.35 in
+    one run and 4.71 in another, with nothing changed but the board's row
+    order. Sorting by consensus rank and then id before the first pick makes
+    the noise assignment a function of the players, not of the valuation.
+    """
+    cols = [c for c in ("adp_rank", "player_id") if c in board.columns]
+    if not cols:
+        return board
+    return board.sort_values(cols, kind="stable")
 
 
 def gaussian_opponent(sigma: dict[str, float], need_boost: float = 1.6,
@@ -821,12 +971,19 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
                    value_col: str = "vorp", seed: int | None = None,
                    caps: dict[str, int] | None = None,
                    opponent_factory=None,
+                   policy: dict | None = None,
                    lookahead_rule: str = "next_pick",
                    ) -> dict[int, Roster]:
     """Run one full snake draft.
 
     `board` needs columns: `player_id`, `player_name`, `position`, `adp_rank`,
     and `value_col`. `my_slot` is 1-indexed.
+
+    `policy` carries `ValueDrafter`'s optional switches (`run_aware`,
+    `depth_tiebreak`) from `config: draft_policy`. `None` is the drafter as
+    it always was; with `run_aware` on, the recent-picks run detector the
+    monitor shows is also fed to the simulated drafter, so the backtest
+    scores what the monitor would recommend.
 
     `opponent_factory` takes the draft's RNG and returns the model the nine
     other seats draft with. `None` builds the gaussian model from `sigma`,
@@ -868,11 +1025,12 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
     factory = opponent_factory or gaussian_opponent(sigma, need_boost,
                                                     need_penalty)
     opponent = factory(rng, board, teams)
-    me = ValueDrafter(value_col, caps=caps)
+    me = ValueDrafter(value_col, caps=caps, **(policy or {}))
     my_team = my_slot - 1
 
-    available = board.copy()
+    available = canonical_order(board).copy()
     order = snake_order(teams, rounds)
+    taken_positions: list[dict] = []
 
     for pick_no, team in enumerate(order, start=1):
         if available.empty:
@@ -883,12 +1041,15 @@ def simulate_draft(board: pd.DataFrame, *, teams: int, rounds: int,
 
         picks_remaining = roster_size - len(roster.picks)
         if team == my_team:
+            runs = positional_run(taken_positions) if me.run_aware else None
             idx = me.choose(available, roster, roster_size, picks_remaining,
-                            lookahead_for(pick_no, teams, my_slot))
+                            lookahead_for(pick_no, teams, my_slot),
+                            runs=runs)
         else:
             idx = opponent.choose(available, roster)
 
         row = available.loc[idx]
+        taken_positions.append({"position": str(row["position"])})
         roster.picks.append({
             "pick_no": pick_no,
             "round": (pick_no - 1) // teams + 1,

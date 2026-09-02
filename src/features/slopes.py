@@ -25,11 +25,17 @@ from .calibration import DEFAULT_SLOPES, fit_slopes
 
 def fitted_slopes(cfg: dict, rankings: pd.DataFrame, totals: pd.DataFrame,
                   crosswalk, seasons: list[int], *,
+                  opportunity_for=None,
                   verbose: bool = False) -> dict[str, float]:
     """Per-position calibration slopes, measured where possible.
 
     Returns the configured priors unchanged when `fit_from_history` is off or
     when there is not enough history to fit — never a silently empty dict.
+
+    The pairs are built through the same blend the slope is applied to (see
+    `history.projection_actual_pairs`); `opportunity_for(season)` supplies the
+    expected-points table for a prior season, and is the only reason this
+    function needs to know anything about ingest.
     """
     priors = {**DEFAULT_SLOPES, **(cfg.get("calibration", {}).get("slopes") or {})}
     fit_cfg = (cfg.get("calibration", {}).get("fit_from_history") or {})
@@ -40,10 +46,14 @@ def fitted_slopes(cfg: dict, rankings: pd.DataFrame, totals: pd.DataFrame,
     # time; this is the one place the two need to meet.
     from ..ingest.history import projection_actual_pairs
 
+    weights = {k: float(v)
+               for k, v in (cfg.get("blend", {}).get("components") or {}).items()}
     pairs = projection_actual_pairs(
         rankings, totals, crosswalk, list(seasons),
         downweight=cfg.get("backtest", {}).get("downweight"),
         top_n=int(fit_cfg.get("top_n", 40)),
+        blend_weights=weights or None,
+        opportunity_for=opportunity_for,
     )
     if pairs.empty:
         return priors
@@ -51,12 +61,15 @@ def fitted_slopes(cfg: dict, rankings: pd.DataFrame, totals: pd.DataFrame,
     slopes = fit_slopes(
         pairs, projection_col="projection", actual_col="actual",
         priors=priors, min_obs=int(fit_cfg.get("min_obs", 40)),
+        prior_weight=int(fit_cfg.get("prior_weight", 0)),
     )
 
     if verbose:
         seasons_fit = sorted(pairs["season"].unique())
         print(f"  calibration slopes fit on {seasons_fit} "
-              f"({len(pairs)} projection/actual pairs):")
+              f"({len(pairs)} projection/actual pairs, "
+              f"{pairs.attrs.get('zero_actual', 0)} paired at zero because the "
+              f"player recorded no stats that season):")
         for pos in ("QB", "RB", "WR", "TE", "K", "DEF"):
             n = int((pairs["position"] == pos).sum())
             mark = "prior" if n < int(fit_cfg.get("min_obs", 40)) else "fit"

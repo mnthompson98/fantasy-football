@@ -16,7 +16,10 @@ from typing import Callable, Sequence
 
 import pandas as pd
 
-RAW_DIR = Path("data/raw")
+# Anchored to the repo, not the working directory. A cwd-relative path meant
+# every script run from anywhere else (Task Scheduler starts in System32)
+# re-downloaded six seasons into a second cache nobody knew about.
+RAW_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
 
 # Rankings are re-scraped daily by ffverse; anything older than this is stale
 # for draft purposes. Season stats for *completed* seasons never change.
@@ -97,8 +100,17 @@ def _cached(name: str, loader: Callable[[], "object"], *,
 
 
 def _seasons_key(seasons: Sequence[int]) -> str:
+    """Cache name for a season set. A contiguous range keeps the short
+    `first_last` form; anything with gaps lists every season, because
+    `[2020, 2025]` and `2020..2025` used to share one file."""
     s = sorted(set(int(x) for x in seasons))
-    return f"{s[0]}_{s[-1]}" if s else "none"
+    if not s:
+        return "none"
+    if s == list(range(s[0], s[-1] + 1)):
+        return f"{s[0]}_{s[-1]}"
+    # A different separator from the range form, or `[2020, 2025]` would
+    # still spell exactly the same name as `2020..2025`.
+    return "+".join(str(x) for x in s)
 
 
 # --------------------------------------------------------------------------

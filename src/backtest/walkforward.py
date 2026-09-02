@@ -46,6 +46,14 @@ class FoldSpec:
 @dataclass
 class BacktestConfig:
     seasons: list[int]
+    # How far before the target season the training window ends. 1 means
+    # training runs through Y-1 — the season immediately before the target,
+    # with NO gap season between them. That is deliberate and it is what the
+    # live board does too: `prior_points` and `xfp_points` are *last season's*
+    # numbers, so `max(train)` has to be Y-1 for the fold to value players the
+    # way draft day will. Earlier docs called this a "purged" gap; it is not
+    # one, and inserting one would make the backtest score a different
+    # program than the one that drafts. See CLAUDE.md "Leakage rules".
     purge_gap: int = 1
     seed: int = 20260830
     drafts_per_season: int = 40
@@ -84,9 +92,20 @@ class BacktestConfig:
     # How many of each position is worth owning. None keeps ValueDrafter's
     # defaults; config/league.yaml `draft_policy.position_caps` overrides.
     caps: dict[str, int] | None = None
+    # `ValueDrafter`'s optional switches (`run_aware`, `depth_tiebreak`), from
+    # `config: draft_policy`. None is the drafter every recorded number was
+    # measured with; it is omitted from the hash at that default for the same
+    # reason `opponent` is.
+    policy: dict | None = None
     # Credit an unfilled starting slot with what a streamer scored that week.
     # Off, the scorer punishes thin rosters for the absence of a waiver wire.
     model_waivers: bool = True
+    # The weeks the scorer sums. From `verified.playoff_week_start` /
+    # `verified.playoff_weeks` in the config rather than literals in
+    # `metrics.py`, so a commissioner moving the playoffs a week moves the
+    # primary metric with them.
+    playoff_weeks: tuple[int, ...] = M.PLAYOFF_WEEKS
+    regular_weeks: tuple[int, ...] = M.REGULAR_WEEKS
     # The parts of config/league.yaml that decide how players are *valued*:
     # blend weights, calibration, market anchor, season downweighting. They live
     # outside this dataclass but they change the answer, so they belong in the
@@ -104,8 +123,14 @@ class BacktestConfig:
     # Only defaults are exempt, and only for fields that did not exist when the
     # fixture was recorded. `opponent="gaussian"` is the field the baseline was
     # measured under; `opponent="league"` changes the hash, which is the point.
-    _HASH_OMIT_WHEN_DEFAULT = {"opponent": "gaussian", "my_slot": None,
-                               "lookahead_rule": "next_pick"}
+    _HASH_OMIT_WHEN_DEFAULT = {
+        "opponent": "gaussian",
+        "playoff_weeks": M.PLAYOFF_WEEKS,
+        "regular_weeks": M.REGULAR_WEEKS,
+        "policy": None,
+        "my_slot": None,
+        "lookahead_rule": "next_pick",
+    }
 
     def hash(self) -> str:
         payload = json.dumps(
@@ -118,9 +143,11 @@ class BacktestConfig:
 
 
 def build_folds(cfg: BacktestConfig) -> list[FoldSpec]:
-    """Expanding-window folds with a purge gap.
+    """Walk-forward folds: train through `target - purge_gap`, score `target`.
 
-    The earliest seasons are consumed as training only — a fold needs at least
+    With the shipping `purge_gap=1` there is no gap season — the 2025 fold
+    trains through 2024, exactly as the 2026 board trains through 2025. The
+    earliest seasons are consumed as training only — a fold needs at least
     `min_train_seasons` behind it to be worth scoring.
 
     `max_train_seasons` turns the expanding window into a rolling one, keeping
@@ -190,10 +217,13 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
 
     # What a streamer was worth each week, so an unfilled starting slot is
     # charged the cost of streaming rather than the cost of fielding nobody.
+    regular = tuple(cfg.regular_weeks)
+    playoff = tuple(cfg.playoff_weeks)
+    all_weeks = regular + playoff
     waiver_by_week = {
         wk: M.waiver_levels(season_actuals[season_actuals["week"] == wk],
                             cfg.starters, cfg.teams)
-        for wk in M.REGULAR_WEEKS + M.PLAYOFF_WEEKS
+        for wk in all_weeks
     } if cfg.model_waivers else {}
 
     rng = np.random.default_rng(cfg.seed + fold.target_season)
@@ -215,7 +245,7 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
             flex_eligible=cfg.flex_eligible, sigma=cfg.sigma,
             need_boost=cfg.need_boost, need_penalty=cfg.need_penalty,
             value_col=cfg.value_col, seed=seed, caps=cfg.caps,
-            opponent_factory=opponent_factory,
+            opponent_factory=opponent_factory, policy=cfg.policy,
             lookahead_rule=cfg.lookahead_rule,
         )
 
@@ -231,15 +261,15 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
                     cfg.flex_slots, cfg.flex_eligible,
                     waiver=waiver_by_week.get(wk),
                 )
-                for wk in M.REGULAR_WEEKS + M.PLAYOFF_WEEKS
+                for wk in all_weeks
             }
 
         mine = weekly_by_team[my_team]
-        playoff_pts = sum(mine.get(w, 0.0) for w in M.PLAYOFF_WEEKS)
-        regular_pts = sum(mine.get(w, 0.0) for w in M.REGULAR_WEEKS)
+        playoff_pts = sum(mine.get(w, 0.0) for w in playoff)
+        regular_pts = sum(mine.get(w, 0.0) for w in regular)
 
         schedule = M.round_robin_schedule(
-            cfg.teams, M.REGULAR_WEEKS, my_team, seed=seed
+            cfg.teams, regular, my_team, seed=seed
         )
         wins, losses = M.head_to_head_record(mine, weekly_by_team, schedule)
 
@@ -248,11 +278,19 @@ def run_fold(fold: FoldSpec, cfg: BacktestConfig, *,
         }
         ranks = M.rank_teams_by_points(season_totals)
 
+        # Diagnostic only. Compares the *calibrated* projection — the number
+        # the drafter actually ranks on — with realized points over the same
+        # weeks the scorer uses; week 18 is not a fantasy week and was leaking
+        # into "actual" here.
         acc = {"mae": None, "rmse": None, "spearman": None}
         my_ids = team_ids[my_team]
-        proj = board[board["player_id"].isin(my_ids)][["player_id", "projection"]]
+        proj_col = ("projection_calibrated"
+                    if "projection_calibrated" in board.columns else "projection")
+        proj = (board[board["player_id"].isin(my_ids)][["player_id", proj_col]]
+                .rename(columns={proj_col: "projection"}))
         realized = (
-            season_actuals[season_actuals["player_id"].isin(my_ids)]
+            season_actuals[season_actuals["player_id"].isin(my_ids)
+                           & season_actuals["week"].isin(all_weeks)]
             .groupby("player_id")["points"].sum().rename("actual").reset_index()
         )
         merged = proj.merge(realized, on="player_id", how="inner")

@@ -36,6 +36,11 @@ DEFAULT_SCORING = {
     "xpm": 1.0, "xpmiss": -1.0,
     "sack": 1.0, "int": 2.0, "safe": 2.0, "blk_kick": 2.0,
     "def_td": 6.0, "def_st_td": 6.0, "st_td": 6.0,
+    # `ff` / `fum_rec` are the *defensive* forced-fumble and recovery keys;
+    # `def_st_*` are the special-teams variants. The league pays 2.0 for a
+    # defensive recovery, and reading the ST key scored it at 1.0 for five
+    # seasons of history. Verified against league 1389723592727461888.
+    "ff": 1.0, "fum_rec": 2.0,
     "def_st_ff": 1.0, "def_st_fum_rec": 1.0,
     "pts_allow_0": 10.0, "pts_allow_1_6": 7.0, "pts_allow_7_13": 4.0,
     "pts_allow_14_20": 1.0, "pts_allow_21_27": 0.0, "pts_allow_28_34": -1.0,
@@ -74,15 +79,28 @@ class Scoring:
         return abs(self.get("rec") - 1.0) < 1e-9
 
 
+# Columns `_col` has already reported missing, so the warning prints once per
+# process rather than once per stat per call.
+_REPORTED_MISSING: set[str] = set()
+
+
 def _col(df: pd.DataFrame, name: str) -> pd.Series:
     """A missing stat column means zero of that stat, not a crash.
 
     nflverse adds and renames columns between releases; a board that dies
     because `passing_2pt_conversions` got renamed is worse than one that scores
-    two-point conversions as zero and says so.
+    two-point conversions as zero and says so. "Says so" is the important
+    half: a silent zero is how a whole stat category disappears from five
+    seasons of history without anyone noticing, so each missing column is
+    named on stderr the first time it is asked for.
     """
     if name in df.columns:
         return pd.to_numeric(df[name], errors="coerce").fillna(0.0)
+    if name not in _REPORTED_MISSING and len(df):
+        _REPORTED_MISSING.add(name)
+        import sys
+        print(f"  [warn] scoring: stat column {name!r} is missing; scoring it "
+              f"as zero", file=sys.stderr)
     return pd.Series(0.0, index=df.index)
 
 
@@ -164,8 +182,8 @@ def score_defense(team_weekly: pd.DataFrame, schedules: pd.DataFrame,
     df["fantasy_points"] = (
         _col(df, "def_sacks") * s.get("sack")
         + _col(df, "def_interceptions") * s.get("int")
-        + _col(df, "fumble_recovery_opp") * s.get("def_st_fum_rec")
-        + _col(df, "def_fumbles_forced") * s.get("def_st_ff")
+        + _col(df, "fumble_recovery_opp") * s.get("fum_rec")
+        + _col(df, "def_fumbles_forced") * s.get("ff")
         + _col(df, "def_tds") * s.get("def_td")
         + _col(df, "special_teams_tds") * s.get("st_td")
         + _col(df, "def_safeties") * s.get("safe")

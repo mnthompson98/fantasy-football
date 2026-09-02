@@ -59,6 +59,15 @@ def load_config() -> dict:
     return yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
 
 
+def _rel(path: Path) -> str:
+    """Repo-relative for display when inside the repo; `--out` may point
+    anywhere, and `relative_to` raises on a path outside it."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def attach_availability(pool: pd.DataFrame, cw) -> pd.DataFrame:
     """Fold in Sleeper's live injury status and current team.
 
@@ -104,7 +113,16 @@ def assemble(cfg: dict, *, refresh: bool = False, league_id: str | None = None,
 
     hist_seasons = seasons or [int(s) for s in cfg["backtest"]["seasons"]]
     prior_season = max(hist_seasons)
-    target = int(target_season) if target_season else prior_season + 1
+    # The season being drafted for is a config fact (`current.season`), not
+    # "whatever the history list ends at plus one" — the two drift apart the
+    # first time someone appends a season to `backtest.seasons`.
+    configured = (cfg.get("current") or {}).get("season")
+    target = int(target_season or configured or prior_season + 1)
+    if target != prior_season + 1:
+        raise ValueError(
+            f"target season {target} but history ends at {prior_season}; the "
+            f"blend's prior-season components need {target - 1}. Pass "
+            f"--seasons or fix config current.season / backtest.seasons.")
     boundary = TemporalBoundary(target_season=target)
 
     print(f"scoring history {min(hist_seasons)}-{prior_season}...")
@@ -145,7 +163,8 @@ def assemble(cfg: dict, *, refresh: bool = False, league_id: str | None = None,
     # that `rankings` holds. Handing it the current-only frame would find no
     # history, silently fall back to the priors, and print nothing about it.
     archive = nv.load_ff_rankings_history(refresh=refresh)
-    slopes = fitted_slopes(cfg, archive, totals, cw, hist_seasons, verbose=True)
+    slopes = fitted_slopes(cfg, archive, totals, cw, hist_seasons,
+                           opportunity_for=H.opportunity_for, verbose=True)
 
     shape = LeagueShape.from_config(cfg)
     excluded = pool[~pool["available"]].copy()
@@ -209,7 +228,7 @@ def main() -> int:
                             "injury_status", "adp_rank") if c in excluded.columns]
         excluded.sort_values("adp_rank")[cols].to_csv(excluded_path, index=False)
         print(f"\n{len(excluded)} players gated out (injury/roster status) -> "
-              f"{excluded_path.relative_to(ROOT)}")
+              f"{_rel(excluded_path)}")
         for row in excluded.sort_values("adp_rank").head(8).itertuples():
             print(f"    {row.position:<3} {str(row.player_name)[:24]:<24} "
                   f"{row.injury_status}  (ECR {row.adp_rank})")
@@ -233,7 +252,7 @@ def main() -> int:
 
     print("\nwrote:")
     for kind, path in paths.items():
-        print(f"  {kind:<8} {path.relative_to(ROOT)}")
+        print(f"  {kind:<8} {_rel(path)}")
     print("\nlive monitor:")
     print("  python -m src.draft.monitor --draft-id <id> --my-slot <n>")
     return 0

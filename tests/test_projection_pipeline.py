@@ -207,8 +207,9 @@ def test_defense_is_charged_with_what_the_opponent_scored():
     out = score_defense(team_weekly, schedules, SCORING)
     # IND scored 10, so HOU's defense is in the 7-13 tier (+4), not HOU's 27.
     assert out["points_allowed"].iloc[0] == 10
-    # 3 sacks + 4 int + 6 TD + 1 fum rec + 4 tier = 18
-    assert out["fantasy_points"].iloc[0] == pytest.approx(18.0)
+    # 3 sacks + 4 int + 6 TD + 2 fum rec (`fum_rec`, the defensive key, not
+    # the special-teams one) + 4 tier = 19
+    assert out["fantasy_points"].iloc[0] == pytest.approx(19.0)
 
 
 def test_score_weekly_does_not_pay_a_kicker_for_receiving_yards():

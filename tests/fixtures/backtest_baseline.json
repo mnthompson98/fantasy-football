@@ -10,14 +10,18 @@
  },
  "max_loss_to_adp": 0.5,
  "valuation_fingerprint": {
-  "src/features/pipeline.py": "4aec0bc931211336",
-  "src/features/blend.py": "e2838a764d98f45b",
-  "src/features/calibration.py": "e2ec64f146f8f1e4",
-  "src/features/rank_curve.py": "f2c47227633df120",
-  "src/features/market_anchor.py": "b472c04e229a5dd3",
-  "src/features/slopes.py": "922965d26954949a",
-  "src/features/vorp.py": "82905ba7da12b785",
-  "src/backtest/draft_sim.py": "d6d909427e896379"
+  "src/features/pipeline.py": "bfd335d0313c70a9",
+  "src/features/blend.py": "c4a67e2a9280fb19",
+  "src/features/calibration.py": "c626e02205ffa335",
+  "src/features/rank_curve.py": "5902f55fe4fea855",
+  "src/features/market_anchor.py": "2cabf0d6ae74a56d",
+  "src/features/slopes.py": "c3ba18946653fcb0",
+  "src/features/vorp.py": "24b592336d71c877",
+  "src/features/scoring.py": "0facc9653298e226",
+  "src/ingest/history.py": "55552d7e2ea051be",
+  "src/backtest/draft_sim.py": "ab3cffab53a4be62",
+  "src/backtest/walkforward.py": "07b0be93ab42a137",
+  "src/backtest/metrics.py": "89048f92c828d37a"
  },
  "drafts_per_season": 40,
  "seed": 20260830,
@@ -26,54 +30,54 @@
   "vorp": {
    "seasons": {
     "2022": {
-     "league_rank_by_points": 3.875,
-     "playoff_points": 409.102
+     "league_rank_by_points": 3.975,
+     "playoff_points": 420.193
     },
     "2023": {
-     "league_rank_by_points": 2.275,
-     "playoff_points": 407.163
+     "league_rank_by_points": 4.45,
+     "playoff_points": 413.298
     },
     "2024": {
-     "league_rank_by_points": 4.0,
-     "playoff_points": 449.807
+     "league_rank_by_points": 4.225,
+     "playoff_points": 447.01
     },
     "2025": {
-     "league_rank_by_points": 7.8,
-     "playoff_points": 374.264
+     "league_rank_by_points": 5.95,
+     "playoff_points": 374.844
     }
    },
    "all": {
-    "league_rank_by_points": 4.4875,
-    "playoff_points": 410.084,
-    "win_rate": 0.5638
+    "league_rank_by_points": 4.65,
+    "playoff_points": 413.836,
+    "win_rate": 0.558
    },
-   "config_hash": "7223f4e945c2"
+   "config_hash": "816f6b0dab7f"
   },
   "adp_value": {
    "seasons": {
     "2022": {
-     "league_rank_by_points": 4.275,
-     "playoff_points": 402.885
+     "league_rank_by_points": 3.9,
+     "playoff_points": 419.335
     },
     "2023": {
-     "league_rank_by_points": 4.75,
-     "playoff_points": 382.883
+     "league_rank_by_points": 4.825,
+     "playoff_points": 388.918
     },
     "2024": {
-     "league_rank_by_points": 5.0,
-     "playoff_points": 426.255
+     "league_rank_by_points": 4.85,
+     "playoff_points": 445.389
     },
     "2025": {
-     "league_rank_by_points": 4.0,
-     "playoff_points": 433.866
+     "league_rank_by_points": 4.8,
+     "playoff_points": 418.627
     }
    },
    "all": {
-    "league_rank_by_points": 4.5062,
-    "playoff_points": 411.472,
-    "win_rate": 0.5536
+    "league_rank_by_points": 4.5938,
+    "playoff_points": 418.067,
+    "win_rate": 0.5283
    },
-   "config_hash": "318e6021af83"
+   "config_hash": "fe2ae790f4e5"
   }
  }
 }

@@ -39,6 +39,7 @@ from src.backtest.draft_sim import (  # noqa: E402
     Roster,
     ValueDrafter,
     picks_until_next_turn,
+    policy_from_config,
 )
 from src.draft.board import best_available, positional_run, refresh_html  # noqa: E402
 from src.features.vorp import LeagueShape  # noqa: E402
@@ -90,6 +91,14 @@ class DraftState:
     recommendation: pd.Series | None = None
     reason: str | None = None
     complete: bool = False
+    # Between turns the recommendation is a *preview*: computed on the
+    # players expected to survive until our next pick, not on everyone
+    # available now. Replayed against the real 2025 draft, the rec shown
+    # right after our pick was gone by our next turn 9 times in 15 — a
+    # suggestion the phone displays for eight minutes that cannot be acted
+    # on is worse than none. `my_next_pick` is the pick number it is for.
+    preview: bool = False
+    my_next_pick: int | None = None
 
 
 def _roster_for(picks: list[dict], my_slot: int, board: pd.DataFrame,
@@ -144,11 +153,14 @@ def _roster_for(picks: list[dict], my_slot: int, board: pd.DataFrame,
 def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
                 teams: int, rounds: int, shape: LeagueShape,
                 caps: dict[str, int] | None = None,
+                policy: dict | None = None,
                 lookahead_rule: str = "next_pick") -> DraftState:
     """Fold the raw picks feed into everything the display needs.
 
-    `lookahead_rule` is `config draft_policy.lookahead_rule`, the same key
-    `scripts/run_backtest.py` reads. It must not become a literal here: the
+    `policy` is `draft_sim.policy_from_config(cfg["draft_policy"])` — the
+    same switches the backtest runs with, or None for the drafter as
+    recorded. `lookahead_rule` is `config draft_policy.lookahead_rule`, read
+    by the backtest from the same key. Neither may become a literal here: the
     monitor and the backtest running different pick policies is the failure
     this module's own docstring exists to prevent.
     """
@@ -213,20 +225,43 @@ def draft_state(picks: list[dict], board: pd.DataFrame, *, my_slot: int,
     picks_remaining = rounds - len(roster.picks)
     if (not state.complete and more_turns and picks_remaining > 0
             and not available.empty):
-        drafter = ValueDrafter(caps=caps)
+        drafter = ValueDrafter(caps=caps, **(policy or {}))
+        run_info = runs if drafter.run_aware else None
         try:
+            if state.mine:
+                pool, look = available, lookahead
+            else:
+                # Preview for our next turn: rank over who plausibly survives
+                # the `until` picks before it, with the lookahead measured
+                # from *that* pick. Same policy, same survivor model, just
+                # applied one turn ahead instead of pretending it is our
+                # turn now.
+                state.preview = True
+                state.my_next_pick = made + 1 + until
+                pool = drafter.survivors(available, until, run_info)
+                # `lookahead_for`, not `picks_until_next_turn`: the preview has
+                # to be the recommendation you will actually get at that pick,
+                # and at a turn slot the two rules disagree there by 18 picks.
+                look = lookahead_for(state.my_next_pick, teams, my_slot)
+                if pool.empty:
+                    pool = available
             # Top 3: the pick, plus a couple of runners-up worth knowing about.
             # A forced (scarcity / end-of-draft) pick is always alone in the
             # list — see `Candidate.forced` — because there is no real
             # alternative to show at that point, only a reason there wasn't one.
             state.candidates = drafter.rank(
-                available, roster, rounds, picks_remaining, lookahead, top_n=3)
+                pool, roster, rounds, picks_remaining, look, top_n=3,
+                runs=run_info)
             top = state.candidates[0]
-            state.recommendation = available.loc[top.index]
+            state.recommendation = pool.loc[top.index]
             state.reason = top.reason
-        except (ValueError, KeyError, IndexError):
+        except (ValueError, KeyError, IndexError) as exc:
             # A recommendation is a nicety; the board is the deliverable. Never
-            # let a policy edge case take the monitor down mid-draft.
+            # let a policy edge case take the monitor down mid-draft — but do
+            # say so. A blank recommendation with no reason is indistinguishable
+            # from "your picks are done", and the one real way to land here is
+            # a board with NaN values at a whole position.
+            print(f"  [warn] no recommendation: {type(exc).__name__}: {exc}")
             state.candidates = []
             state.recommendation = None
     return state
@@ -326,7 +361,11 @@ def render(state: DraftState, *, top_n: int = 8,
 
     if state.recommendation is not None:
         out.append("")
-        out.append(f"  >> TAKE: {_line(state.recommendation)}")
+        if state.preview:
+            out.append(f"  >> LIKELY AT YOUR TURN (pick {state.my_next_pick}): "
+                       f"{_line(state.recommendation)}")
+        else:
+            out.append(f"  >> TAKE: {_line(state.recommendation)}")
         if state.reason:
             out.append(f"     why:  {state.reason}")
         # A forced pick (scarcity / end-of-draft) has no real alternative —
@@ -369,7 +408,8 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
         interval: float = 5.0, top_n: int = 8,
         shape: LeagueShape | None = None, caps: dict[str, int] | None = None,
         html_path: Path | None = None, expect_user_id: str | None = None,
-        board_meta: dict | None = None, slot_source: str = "flag",
+        board_meta: dict | None = None, policy: dict | None = None,
+        slot_source: str = "flag",
         lookahead_rule: str = "next_pick") -> None:
     interval = max(MIN_POLL_S, interval)
 
@@ -385,10 +425,19 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
     except Exception:
         pass
 
-    draft = get_draft(draft_id) or {}
+    # Sleeper answers an unknown id with `null`, not 404. Defaulting to a
+    # 10x16 draft here used to leave a typo'd id polling an empty feed all
+    # night, announcing "YOU ARE ON THE CLOCK" for pick 1 with a straight face.
+    draft = get_draft(draft_id)
+    if draft is None:
+        raise ValueError(f"Sleeper has no draft {draft_id}; check --draft-id")
     settings = draft.get("settings") or {}
-    teams = int(settings.get("teams") or 10)
-    rounds = int(settings.get("rounds") or 16)
+    if not settings.get("teams") or not settings.get("rounds"):
+        raise ValueError(
+            f"draft {draft_id} reports no teams/rounds in settings "
+            f"({settings}); refusing to guess the draft shape")
+    teams = int(settings["teams"])
+    rounds = int(settings["rounds"])
 
     if not 1 <= my_slot <= teams:
         raise ValueError(
@@ -431,9 +480,15 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
               "recommendation. A wrong slot builds someone else's roster.")
 
     if shape is None:
-        shape = LeagueShape(teams=teams,
-                            starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1,
-                                      "K": 1, "DEF": 1})
+        # Prefer the configured league shape over a literal; the literal only
+        # remains as a last resort for a checkout with no config at all.
+        if CONFIG.exists():
+            shape = LeagueShape.from_config(
+                yaml.safe_load(CONFIG.read_text(encoding="utf-8")))
+        else:
+            shape = LeagueShape(teams=teams,
+                                starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1,
+                                          "K": 1, "DEF": 1})
 
     warning = scoring_mismatch(board_meta or {}, draft)
 
@@ -445,6 +500,8 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
               f"'{lookahead_rule}'")
     if caps:
         print("  caps: " + ", ".join(f"{k} {v}" for k, v in sorted(caps.items())))
+    if policy:
+        print("  policy: " + ", ".join(sorted(policy)))
     if html_path:
         print(f"  live board: {html_path}")
     if warning:
@@ -465,7 +522,7 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
 
         state = draft_state(picks, board, my_slot=my_slot, teams=teams,
                             rounds=rounds, shape=shape, caps=caps,
-                            lookahead_rule=lookahead_rule)
+                            policy=policy, lookahead_rule=lookahead_rule)
 
         # `last is None` is the first poll. Print then even at zero picks —
         # otherwise a monitor started before the draft shows nothing at all,
@@ -479,7 +536,9 @@ def run(draft_id: str, board: pd.DataFrame, my_slot: int, *,
                 try:
                     refresh_html(board, html_path, state.drafted,
                                  meta={"picks": f"{state.made}/{state.total}"},
-                                 candidates=state.candidates)
+                                 candidates=state.candidates,
+                                 preview_pick=(state.my_next_pick
+                                               if state.preview else None))
                 except OSError as exc:
                     print(f"  [warn] could not rewrite {html_path}: {exc}")
             if state.complete:
@@ -586,6 +645,7 @@ def main() -> int:
 
     shape = None
     caps = None
+    policy = None
     user_id = None
     current_draft_id = None
     configured_slot = None
@@ -594,6 +654,7 @@ def main() -> int:
         cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
         shape = LeagueShape.from_config(cfg)
         caps = (cfg.get("draft_policy", {}) or {}).get("position_caps") or None
+        policy = policy_from_config(cfg.get("draft_policy"))
         user_id = (cfg.get("user", {}) or {}).get("sleeper_user_id")
         current_draft_id = (cfg.get("current", {}) or {}).get("draft_id")
         configured_slot = (cfg.get("current", {}) or {}).get("my_slot")
@@ -619,7 +680,7 @@ def main() -> int:
     try:
         run(args.draft_id, board, my_slot, interval=args.interval,
             shape=shape, caps=caps, html_path=html_path,
-            expect_user_id=user_id, board_meta=board_meta,
+            expect_user_id=user_id, board_meta=board_meta, policy=policy,
             slot_source="flag" if args.my_slot is not None else "config",
             lookahead_rule=lookahead_rule)
     except KeyboardInterrupt:

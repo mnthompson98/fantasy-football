@@ -68,9 +68,14 @@ def availability_history(weekly: pd.DataFrame, *,
                          min_games: int = 4) -> pd.DataFrame:
     """One row per player-season: games played and the share of the season.
 
-    `min_games` drops cameo seasons. A practice-squad callup who played twice is
-    not a durability observation about a starter; he is noise that would drag
-    every positional mean down.
+    `min_games` decides which *players* are durability observations at all: a
+    practice-squad callup who played twice in his only season is not one, and
+    would drag every positional mean down. It is applied per player, not per
+    season — a player with at least one qualifying season keeps *every* season,
+    including the one where he tore an ACL in week 2. Filtering those seasons
+    out (the previous behaviour) was survivorship bias in its purest form: the
+    most fragile observations were exactly the ones being discarded, and every
+    injury-prone starter looked healthier than he was.
     """
     df = weekly
     if "season_type" in df.columns:
@@ -82,7 +87,8 @@ def availability_history(weekly: pd.DataFrame, *,
                 playoff_games=lambda w: len(set(w) & set(PLAYOFF_WEEKS)))
            .reset_index())
     out["availability"] = out["games"] / GAMES_IN_FANTASY_SEASON
-    return out[out["games"] >= min_games].reset_index(drop=True)
+    established = set(out.loc[out["games"] >= min_games, "player_key"])
+    return out[out["player_key"].isin(established)].reset_index(drop=True)
 
 
 def durability(history: pd.DataFrame, as_of_season: int, *,

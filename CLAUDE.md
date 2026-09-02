@@ -150,14 +150,23 @@ depend on these. The league payload also carries a vestigial
 - **Calibration correction is applied after projection, not learned inside it.**
   Projection spread is systematically too wide; shrink toward the positional mean.
 
-- **Calibration slopes are measured, not assumed.** The config's priors came
-  from a published study and had RB and WR backwards for this league: fit on
-  2021-2025 preseason ECR against realized points, RB is 0.85 and WR 0.77, an
-  exact swap of the prior 0.79 and 0.85. Since a lower slope flattens a
-  position's top end, shrinking RB harder than WR pushed receivers above backs
-  everywhere and the simulated drafter built 8 WR / 2 RB rosters.
-  `src/features/slopes.py` fits per fold on seasons strictly earlier than the
-  target; the config values are now only a fallback.
+- **Calibration slopes are measured, then shrunk back toward the priors.**
+  The config's priors came from a published study and, fit on 2021-2025, RB
+  came out 0.85 and WR 0.77, a swap of the prior 0.79 and 0.85; since a lower
+  slope flattens a position's top end, that swap once built 8 WR / 2 RB
+  rosters. `src/features/slopes.py` fits per fold on seasons strictly earlier
+  than the target, **through the same blend the slope is applied to** (it
+  used to fit on the ECR-only curve and apply the result to the blend).
+
+  Then measured leave-one-season-out (2026-09-01, top 40 per position): any
+  shrink beats none at every position (DEF −32% MSE, QB −10%, K −10%, TE −7%,
+  WR −4%, RB −2%), but a slope fit on the other four seasons predicts **no
+  better than the published priors** anywhere except DEF (where 0.30-0.38
+  fits every season and the prior 0.60 is wrong), and single-season fits
+  swing 0.50-1.14 at RB. The 2022 fold sees one season of 40 pairs. So
+  `calibration.fit_from_history.prior_weight: 80` shrinks the fit toward the
+  prior as if the prior were two seasons of data. The "RB and WR backwards"
+  finding above is inside that noise; do not re-litigate it on four folds.
 
 - **The drafter values a pick by drop-off, not by VORP.** "Take the highest VORP
   available" drafted a backup QB in round 3 of a 1-QB league. Two distinct
@@ -167,12 +176,16 @@ depend on these. The league payload also carries a vestigial
   scale makes an empty starting slot look identical to a replacement-level
   starter (both zero). Lineup value is on a **points** scale for that reason.
 
-- **The blend weights were tried and are not the problem.** Rebuilding the
-  2022-2025 boards under ECR-only, ECR 2/0.5/0.5, ECR 4/0.5/0.5 and equal
-  weights moves the top-60 position mix by two or three slots. Even ECR-only —
-  the market's own ranking as the sole input — puts ~38 QB and ~30 TE in the top
-  60 against the market's 23 and 16. Do not go looking there again; the
-  remaining cross-position error is downstream of the blend.
+- **The production components are off; the blend is ECR-only (2026-09-02).**
+  An earlier note here said the blend weights "were tried and are not the
+  problem" because they barely move the top-60 position mix. They do not
+  move the *mix*; they move the *finish*: in the walk-forward ablation the
+  full blend finished 4.91 against 4.35 for pure consensus and 4.25 for the
+  same pipeline fed ECR alone, and `xfp_points` / `prior_points` cost 0.2-0.7
+  places in every configuration on both noise regimes. They are still
+  computed and carried on the board; `config: blend.components` is where
+  they would come back. The cross-position pricing of QB/TE is still the
+  market anchor's job, not the blend's.
 
 - **FantasyPros point projections are not obtainable; ECR is.** As of 2026-08-30
   fantasypros.com server-renders only the top 10 rows of each projections table,
@@ -200,6 +213,33 @@ depend on these. The league payload also carries a vestigial
   next league-winner. `config: waivers.priority_threshold` (4.0 points added to
   the starting lineup). Streaming a kicker or a bye-week fill from *free agency*
   costs nothing and is never held to that bar.
+
+- **Sleeper's defensive and special-teams fumble keys are different keys.**
+  `fum_rec` (2.0) and `ff` (1.0) are the defensive recovery and forced fumble;
+  `def_st_fum_rec` / `def_st_ff` (1.0) are the special-teams variants. The
+  scorer read the ST keys for five seasons and every DEF was a point short
+  per recovery. `scoring.py` reads `fum_rec` / `ff` and names any nflverse
+  column it cannot find on stderr rather than zeroing it silently.
+
+- **ffopportunity runs through week 22 with no `season_type` column.**
+  `history.opportunity_for` restricts it to weeks 1-17 so `xfp_points` and
+  `prior_points` measure the same games; before that, a Super Bowl team's
+  players carried up to 21 games into a rate that the other component
+  measured over 17.
+
+- **The weekly job derives its week from nflverse's calendar, not from the
+  latest injury report.** On a Tuesday night the latest report is last
+  week's, so `weekly_update` used to title the report with the week just
+  played, overwrite that week's file, and pull matchup context for games
+  already over. `nflreadpy.get_current_week()` is the source now; the season
+  comes from `config: current.season` because `get_current_season()` says
+  2025 until the first Thursday of September 2026.
+
+- **Durability keeps an established player's short seasons.** `min_games`
+  decides which *players* are observations, not which seasons: a starter's
+  two-game ACL season is exactly the fragile observation the feature exists to
+  measure, and dropping seasons under four games was survivorship bias that
+  made every injury-prone starter look healthier than he was.
 
 - **Position and team codes differ per source, and getting it wrong is not
   cosmetic.** DynastyProcess spells kicker `PK` and uses its own team codes
@@ -283,6 +323,14 @@ depend on these. The league payload also carries a vestigial
   ranking falls through to its raw-VORP tiebreak. Raw VORP is the policy
   `ValueDrafter` was written to replace -- see its docstring for the roster it
   builds. This runs on 8 of our 16 picks.
+
+  **It is the same degenerate path `depth_tiebreak` addresses from the other
+  end of the draft** -- once the starters are set every drop-off is zero as
+  well, which is how the 2026-09-01 replay got a second tight end at six
+  consecutive turns. One failure, two triggers. `depth_tiebreak` and
+  `upside_tiebreak` change *what* the zero-gain tiebreak sorts on; the lookahead
+  rule changes whether a turn slot lands in it at all. They are complementary,
+  not alternatives.
 
   **This is a different bug from the on-the-clock lookahead** fixed in
   `src/draft/monitor.py`, which fed a *display* value into the policy where the
@@ -390,6 +438,51 @@ depend on these. The league payload also carries a vestigial
   per-fold swings are large. The direction is real; the magnitude is a
   four-fold estimate.
 
+- **The pick policy has three optional switches, all measured, all shared
+  by the monitor and the backtest through `draft_sim.policy_from_config`.**
+  Replaying the real 2025 draft from slot 4 through the monitor found: the
+  ADP-order survivor assumption named the right players 45% of the time
+  against this room; a run on RB in round 2 did not raise RB's drop-off at
+  all; and from round 10 on every candidate's drop-off is zero (nobody
+  improves a set lineup) so the tie-break is raw VORP, which offered the same
+  second tight end at six consecutive turns. `run_aware` extends a detected
+  run through `survivors()`; `depth_tiebreak` weights bench picks by the
+  insurance they provide; `upside_tiebreak` ranks bench picks on the most
+  bullish expert's rank through the curve (`upside_vorp` on the board).
+  `run_aware` ships on (2026-09-02): worth 0.3-0.45 places and 4-7 playoff
+  points against the field fitted to this league, and it *costs* about the
+  same against the gaussian field, which never runs on a position. That is
+  a judgment that the fitted field is the one that looks like your room.
+  The other two ship off; neither helped anywhere. See HANDOFF.md
+  "Draft-day stress test" and "Shipping config" before changing any of them.
+
+- **Between turns the monitor shows a preview, and says so.** The
+  recommendation right after your pick was gone by your next turn 9 times in
+  15 in the 2025 replay. `draft_state` now ranks over `survivors()` of the
+  picks before your next turn, with the lookahead measured from that pick,
+  and labels it "likely at your turn (pick N)". On the clock it is the
+  unchanged policy over everyone available.
+
+- **The simulator sorts the board into a canonical order before the first
+  pick, and every number recorded before 2026-09-01 was measured without
+  that.** `OpponentModel.choose` draws one gaussian per available player in
+  row order. A board sorted by VORP therefore hands each player a different
+  draw than the same board sorted by ADP, so two runs differing only in
+  `value_col` were never "same seed, only the ordering changed": the
+  identical pure-ADP drafter finished 4.35 in one run and 4.71 in another
+  with nothing changed but row order. `draft_sim.canonical_order` sorts by
+  consensus rank then id first. Consequence for reading old tables:
+  differences under ~0.4 places between configurations measured before the
+  fix are confounded with noise reassignment and are not evidence.
+
+- **The pure-ADP baseline gets one constant replacement level.**
+  `ValueDrafter` puts a pick on a points scale as `value + replacement_points`.
+  With `--value-col adp_value` that mixed a rank with a per-position offset
+  (QB ~218, TE ~118), a hidden positional bias in every flex comparison of
+  the "pure market" run. `run_backtest` now sets a single constant for that
+  ordering, so every effective value stays positive with no offset between
+  positions.
+
 - **The board and the backtest share one valuation pipeline.**
   `src/features/pipeline.py` is called by both `scripts/build_draft_board.py`
   and `scripts/run_backtest.py`. If they diverge, the backtest is scoring a
@@ -417,8 +510,14 @@ When simulating season Y:
 - Features may use data through **Y-1 only**, plus Y's *preseason* ADP/injury/roster
   snapshot. Nothing from Y's regular season.
 - ADP must be the **as-of-draft-day** snapshot, never end-of-season ADP.
-- Training folds are **purged** — a gap season between train and test — so
-  end-of-train information doesn't bleed forward.
+- Training runs **through Y-1 with no gap season**, on purpose. Last season's
+  actual and expected points are blend components, so the fold has to see
+  Y-1 exactly as the live board sees 2025 when it drafts 2026. An earlier
+  version of this file described `purge_gap_seasons: 1` as a purged gap; it
+  never was one (`build_folds` trains through `target - 1`), and inserting a
+  real gap would make the backtest score a program nobody drafts with. The
+  guard `assert_purge_gap` only ensures the target season itself is never in
+  the window.
 - **Tell:** if walk-forward scores are suspiciously stable across folds, assume
   leakage before assuming skill.
 

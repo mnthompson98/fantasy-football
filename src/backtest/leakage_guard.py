@@ -107,11 +107,13 @@ def assert_preseason_only(df: pd.DataFrame, boundary: TemporalBoundary,
 
 def assert_purge_gap(train_seasons: list[int], target_season: int,
                      purge_gap: int = 1) -> None:
-    """Enforce a gap between the training window and the target season.
+    """Enforce that training ends at or before `target - purge_gap`.
 
-    Without a gap, information from the very end of training bleeds into the
-    test season through carryover features (rolling averages, depth-chart state,
-    contract status) that straddle the boundary.
+    With the shipping `purge_gap=1` this means "training ends at Y-1" — there
+    is no gap season, and there must not be one: last season's production is
+    a blend component, and the live board sees Y-1 too. A larger value would
+    insert a real gap; nothing in this repo asks for one. The guard exists so
+    the target season itself can never be in the window.
     """
     if not train_seasons:
         raise LeakageError("empty training window.")
