@@ -358,9 +358,14 @@ depend on these. The league payload also carries a vestigial
   better) and 2024 +0.70 (t=+2.58, worse). This is the four-fold noise floor,
   exactly as with the ADP comparison above -- one season eating another.
 
-  **So it ships as `next_pick`,** which is what every recorded number and
-  `tests/fixtures/backtest_baseline.json` were measured under. The argument for
-  `next_exposed` is correctness rather than points, and it is a real one: in the
+  **It shipped as `next_pick` until 2026-09-02 and ships as `next_exposed`
+  now,** flipped for the live draft on the correctness argument below, not on
+  the measurement above. `tests/fixtures/backtest_baseline.json` was
+  re-recorded under `next_exposed` on 2026-09-19: board 4.47 vs ADP 4.69, a
+  parity gap of −0.22 against the +0.06 recorded under `next_pick` — inside
+  tolerance and inside the noise floor, so it is not evidence the flip helped
+  either. The argument for `next_exposed` is correctness rather than points,
+  and it is a real one: in the
   slot-10 mock (`scripts/mock_draft.py`) `next_pick` takes QB Joe Burrow at pick
   30, fourteen slots ahead of his ADP, on a 0.3-point VORP tiebreak over Omarion
   Hampton; `next_exposed` takes Hampton at value and a quarterback at market in
@@ -369,7 +374,9 @@ depend on these. The league payload also carries a vestigial
   100 mocks (RB 2.20 vs 2.16, WR 8.80 vs 8.84), and flipping the key moves live
   recommendations **and** invalidates the parity fixture, which randomizes slots
   and so includes turn slots 20% of the time. It is one config line and it costs
-  a `check_backtest_baseline` re-record. The manager's call, not the model's.
+  a `check_backtest_baseline` re-record — which is what happened, in that
+  order, with a two-week gap in which `test_backtest_baseline` was red on
+  `main`. The manager's call, not the model's.
 
 - **`ValueDrafter.rank()` exposes the runner-up, not just the winner, without
   touching what actually gets picked.** `choose()` is now `rank(...)[0].index`

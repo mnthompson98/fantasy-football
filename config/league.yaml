@@ -350,14 +350,15 @@ draft_policy:
   # ways and cancel: 2022 -1.27 (t=-2.74, better), 2024 +0.70 (t=+2.58, worse).
   # That is the four-fold noise floor CLAUDE.md names, not a result.
   #
-  # So this ships as `next_pick`: it is what every recorded number and
-  # `tests/fixtures/backtest_baseline.json` were measured under, and the
-  # measurement gives no reason to pay the cost of moving off it. The argument
-  # for `next_exposed` is correctness, not points — see HANDOFF.md. Flipping it
-  # is a PICK-POLICY change: it moves live recommendations AND invalidates the
-  # parity baseline (the fixture randomizes slots, 2 of 10 are turn slots), so
-  # it requires `python -m scripts.check_backtest_baseline` and a deliberate
-  # re-record. One line here, but not a free one.
+  # It shipped as `next_pick` until 2026-09-02, when it was flipped to
+  # `next_exposed` for the live draft on the correctness argument (see
+  # HANDOFF.md), not on the measurement above, which gives no reason either
+  # way. Flipping it is a PICK-POLICY change: it moves live recommendations
+  # AND invalidates the parity baseline (the fixture randomizes slots, 2 of
+  # 10 are turn slots). The baseline was re-recorded under `next_exposed` on
+  # 2026-09-19 (`python -m scripts.check_backtest_baseline --write`); the
+  # parity gap moved +0.06 -> -0.22, inside the 0.35 tolerance and inside
+  # the ~0.4 noise floor. Flipping it back costs the same re-record.
   lookahead_rule: next_exposed
 
 # Consensus blend. Each component is z-scored within position, averaged, then

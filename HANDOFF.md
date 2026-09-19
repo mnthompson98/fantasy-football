@@ -476,15 +476,23 @@ fix to it.
 
 ECR-only blend, `run_aware` on for *both* drafters (the policy applies to
 whichever ordering is being scored), canonical row order, gaussian field,
-40 drafts, seed 20260830. Recorded 2026-09-02.
+40 drafts, seed 20260830, `lookahead_rule: next_exposed`. Re-recorded
+2026-09-19 after the lookahead flip (the fixture had been red on `main`
+since 2026-09-02 because the flip shipped without the re-record it was
+documented to need):
 
 | | rank | playoff pts | 2022 | 2023 | 2024 | 2025 |
 |---|---|---|---|---|---|---|
-| board (ships) | 4.65 | 413.8 | 3.98 | 4.45 | 4.22 | 5.95 |
-| pure consensus | 4.59 | 418.1 | 3.90 | 4.83 | 4.85 | 4.80 |
+| board (ships) | 4.47 | 417.0 | 4.00 | 4.20 | 4.25 | 5.45 |
+| pure consensus | 4.69 | 417.2 | 4.28 | 5.08 | 4.90 | 4.53 |
 
-A tie on rank, ADP still ahead on playoff points, 2025 still the fold the
-board loses, by a place instead of three. Note what `run_aware` did on this
+The previous record (2026-09-02, `next_pick`) was board 4.65 / 413.8 against
+consensus 4.59 / 418.1, per season 3.98 / 4.45 / 4.22 / 5.95 and 3.90 / 4.83 /
+4.85 / 4.80. The gap moved +0.06 → −0.22 and the playoff-points gap −4.3 →
+−0.3: both inside the fixture's tolerance and inside the ~0.4-place noise
+floor, so this is a re-record, not a finding. Read it as the same picture:
+a tie on rank, ADP still (barely) ahead on playoff points, 2025 still the
+fold the board loses, by a place instead of three. Note what `run_aware` did on this
 field: ECR-only without it was 4.25 and consensus 4.35, so on the gaussian
 field it costs both drafters ~0.3-0.4, not the one standard error quoted
 above — the gaussian field never runs on a position, so the switch only
@@ -846,10 +854,15 @@ turn slots). It needs `check_backtest_baseline` and a deliberate re-record.
    `STATUS: OK | DEGRADED | FAILED` line first. DEGRADED means an input was
    stale: a pull that fell back to cache (`nflverse.FALLBACKS`), a weekly feed
    whose games have all already kicked off, or one not scraped in 2+ days.
-   This is what a scheduled reader (Claude Cowork, every Wednesday 7 AM)
-   relays; the prompt it runs under is in `docs/cowork_weekly_prompt.md`.
-   `schedule_weekly` (Task Scheduler) is the alternative if Cowork is not
-   running.
+   This is what a scheduled reader relays — and the reader **cannot run
+   anything**: Claude Cowork's first attempt reported that a linked computer
+   exposes file access only, no shell. So it is two tasks. Windows Task
+   Scheduler runs `scripts/run_weekly.cmd` at Wednesday 06:00
+   (`python -m scripts.schedule_weekly --install`, then `--run-now` to prove
+   it fires; registered with wake-to-run and run-if-missed, log in
+   `outputs/reports/last_run.log`), and Cowork reads `latest.brief.md` at
+   07:00 under the prompt in `docs/cowork_weekly_prompt.md`, which has it
+   check the brief's `Generated` timestamp before believing it.
 
    **Timing caveat for that schedule:** this league processes waivers on
    Wednesday (`waiver_day_of_week: 2`, `waiver_clear_days: 2`). A Wednesday
