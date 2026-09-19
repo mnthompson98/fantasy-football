@@ -16,6 +16,8 @@ The hand-off is a file, and the brief was built for exactly that: a
 `STATUS:` line first (OK / DEGRADED / FAILED), a `Generated` timestamp on the
 line after the title, then only the verdicts (`src/inseason/report.py::brief`).
 
+A second, daily prompt reads the injury brief: `docs/cowork_injury_prompt.md`.
+
 The one failure the brief cannot report on itself is *not having been
 written* — the laptop was asleep, the task did not fire, the wrapper died
 before Python started. So the prompt makes the agent check the `Generated`
@@ -43,6 +45,7 @@ Recurring task, every Wednesday morning at 7 AM:
    - **First, unconditionally:** the STATUS line and the Generated time. If STATUS is DEGRADED or FAILED, put that at the very top in plain words with the reasons the brief lists under "Read this first" (stale cache, rankings for a week already played, feed not scraped, ingestion failure). Say "this may be stale" before saying anything else.
    - Top start/sit calls: projected total, any UNFILLED slot, the close calls, any injury flags on my roster.
    - Waivers: whether anything clears the priority bar, and the free-agent adds.
+   - **Dropped this week by other teams**, as its own bullet group: the brief lists anyone another manager dropped in the last three days and whether he is worth picking up. Relay every one marked "Worth it" with the cost the brief gives him — "CLAIM (burns priority)" if he is still on waivers, "free agent now" if he has cleared — and the "Not worth it" line as-is. If it says nobody was dropped, say that in one line.
    - Trade flags: the surplus players.
 
 3. If you want detail beyond the brief, the full report for the week is `outputs\reports\weekNN.md` (the brief names it). Read it only to answer a question; do not summarize it in place of the brief.

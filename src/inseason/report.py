@@ -49,6 +49,7 @@ def build(*, week: int | None, season: int, lineup: Lineup,
           calls: list, holes: list[str], slots: LineupSlots,
           moves: list, waiver_threshold: float,
           surplus: pd.DataFrame, roster: pd.DataFrame,
+          drops: pd.DataFrame | None = None,
           scrape_date: str | None = None,
           league_name: str = "") -> str:
     """Render the week's decisions as markdown."""
@@ -121,6 +122,24 @@ def build(*, week: int | None, season: int, lineup: Lineup,
                 f"".replace("| " + m.add + " |", f"| {m.add} ({kind}) |", 1))
         lines.append("")
     lines += [waivers_mod.summarize(moves, threshold=waiver_threshold), ""]
+
+    if drops is not None and not drops.empty:
+        lines += ["### Dropped this week by other teams", "",
+                  "*Already in the pool above; shown separately because a "
+                  "dropped player is a claim until he clears waivers, and "
+                  "free after.*", "",
+                  "| Player | Pos | Proj | Lineup + | Dropped by | Status | Verdict |",
+                  "|---|---|---:|---:|---|---|---|"]
+        for r in drops.itertuples(index=False):
+            status = (f"on waivers until {r.on_waivers_until:%a %H:%M} UTC"
+                      if r.on_waivers else "free agent")
+            verdict = ("**worth it**" if r.worth_it
+                       else ("not worth priority" if r.on_waivers and r.net > 0
+                             else "no"))
+            lines.append(
+                f"| {r.player_name} | {r.position} | {_fmt(r.add_points)} | "
+                f"{r.net:+.1f} | {_text(r.dropped_by)} | {status} | {verdict} |")
+        lines.append("")
 
     if not surplus.empty:
         lines += ["## Trade bait", "",
@@ -220,6 +239,7 @@ def brief(*, week: int | None, season: int, issues: list[str],
           waiver_threshold: float | None = None,
           surplus: pd.DataFrame | None = None,
           roster: pd.DataFrame | None = None,
+          drops: pd.DataFrame | None = None,
           scrape_date: str | None = None,
           report_path: str | None = None,
           failed: str | None = None) -> str:
@@ -297,6 +317,30 @@ def brief(*, week: int | None, season: int, issues: list[str],
     if waiver_threshold is not None:
         lines.append(f"- Verdict: "
                      f"{waivers_mod.summarize(moves, threshold=waiver_threshold)}")
+    lines.append("")
+
+    lines += ["## Dropped this week by other teams", ""]
+    if drops is None:
+        lines.append("- Not checked this run.")
+    elif drops.empty:
+        lines.append("- Nobody dropped anyone in the window.")
+    else:
+        worth = drops[drops["worth_it"]]
+        for r in worth.itertuples(index=False):
+            how = ("**CLAIM** (burns priority; on waivers until "
+                   f"{r.on_waivers_until:%a %H:%M} UTC)" if r.on_waivers
+                   else "free agent now")
+            cost = f", drop {r.drop}" if r.drop else ""
+            lines.append(f"- **Worth it:** {r.player_name} ({r.position}) "
+                         f"{r.net:+.1f} to the lineup — {how}{cost}; "
+                         f"dropped by {_text(r.dropped_by)}")
+        rest = drops[~drops["worth_it"]]
+        if not rest.empty:
+            names = ", ".join(
+                f"{r.player_name} ({r.position}, {r.net:+.1f})"
+                for r in rest.head(8).itertuples(index=False))
+            lines.append(f"- Not worth it: {names}"
+                         + (f" and {len(rest) - 8} more" if len(rest) > 8 else ""))
     lines.append("")
 
     lines += ["## Trade flags", ""]

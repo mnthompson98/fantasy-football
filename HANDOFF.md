@@ -864,6 +864,46 @@ turn slots). It needs `check_backtest_baseline` and a deliberate re-record.
    07:00 under the prompt in `docs/cowork_weekly_prompt.md`, which has it
    check the brief's `Generated` timestamp before believing it.
 
+   **The task runs logged-off.** `FantasyWeeklyUpdate` was switched to "Run
+   whether user is logged on or not" in Task Scheduler's GUI on 2026-09-19
+   (`LogonType: Password`, verified by firing it under that principal:
+   result 0, brief regenerated) and runs on battery. The script cannot set
+   that itself — it needs the Windows password — so **every new task
+   registered by `schedule_weekly` starts as logged-on-only** and needs the
+   same GUI flip. Two consequences: the laptop must be on or asleep, not
+   shut down, at 06:00 (wake-to-run handles sleep; run-if-missed catches up
+   at next boot); and **a Windows password change breaks the task silently**
+   — Last Result `0x8007052E` — until the password is re-entered in the
+   task's properties. The repo sits under OneDrive, so it was also checked
+   that no file in the working tree, `data/`, `.git` or `.venv` is a
+   cloud-only placeholder (the sync client is not running while logged off).
+
+   **Two watchers were added on 2026-09-19, both read by Cowork the same
+   way:**
+
+   - *Dropped this week* (`src/inseason/transactions.py`, a section of the
+     Wednesday brief). Sleeper's transaction log gives every completed drop
+     by another team in the last 72h; each is run through the same
+     `waivers.evaluate` as the main wire and labelled with what a pickup
+     costs *right now*: a dropped player sits on waivers for
+     `waiver_clear_days` (2) and is a claim until then, free after. Guardrail
+     #7 applies unchanged — a +1.0 upgrade is "worth it" as a free agent and
+     "not worth priority" while on waivers, and the tests pin that pair. The
+     window is 72h rather than 48h on purpose: from a Wednesday-06:00 run a
+     48h window cannot contain a cleared drop at all. Other teams' *pickups*
+     need no handling — `state.free_agents` is built from current rosters at
+     run time. What is not modelled: a player's waiver status on Sleeper's
+     side (the API does not expose it), so "on waivers until" is computed
+     from the drop time and `waiver_clear_days`.
+   - *Injury watch* (`scripts/injury_watch.py`, `src/inseason/injury_watch.py`,
+     daily 06:30 via `schedule_weekly --task injuries`, brief
+     `outputs/reports/injuries.brief.md`, prompt `docs/cowork_injury_prompt.md`).
+     Your roster only, from Sleeper's designation plus the NFL report's
+     practice column, **as a diff against the previous run** — the snapshot
+     lives in `outputs/reports/injury_state.json`; delete it to reset. It
+     leads with what changed and says "No changes" when nothing did, so the
+     daily message is ignorable on quiet days. It decides nothing.
+
    **Timing caveat for that schedule:** this league processes waivers on
    Wednesday (`waiver_day_of_week: 2`, `waiver_clear_days: 2`). A Wednesday
    7 AM run lands *after* processing, when the wire is mostly free agents
