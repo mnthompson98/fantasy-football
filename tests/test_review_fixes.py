@@ -44,12 +44,22 @@ def _cfg() -> dict:
 
 def test_the_scheduled_task_changes_into_the_repo_before_running():
     """Task Scheduler starts tasks in System32. Without `cd /d` the job
-    could not import `scripts.weekly_update` and failed every Tuesday."""
-    from scripts.schedule_weekly import ROOT as R, _command
+    could not import `scripts.weekly_update` and failed every Tuesday.
+
+    The `cd` now lives in the checked-in wrapper the task calls, relative to
+    the wrapper's own location so the checkout can move; the task command is
+    just that file, quoted, because a repo path with a space inside a
+    `schtasks /TR` string is three layers of quoting deep."""
+    from scripts.schedule_weekly import RUNNER, _command
     cmd = _command()
-    assert "cd /d" in cmd
-    assert str(R) in cmd
-    assert cmd.index("cd /d") < cmd.index("weekly_update")
+    assert cmd == f'"{RUNNER}"'
+    assert RUNNER.exists()
+    body = RUNNER.read_text(encoding="utf-8")
+    assert 'cd /d "%~dp0.."' in body
+    assert "PYTHONIOENCODING=utf-8" in body
+    assert "--refresh" in body
+    assert body.index("cd /d") < body.index("weekly_update")
+    assert "last_run.log" in body
 
 
 def test_the_raw_cache_is_anchored_to_the_repo_not_the_cwd():

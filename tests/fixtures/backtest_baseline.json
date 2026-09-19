@@ -1,7 +1,7 @@
 {
  "note": "Board-vs-ADP parity baseline. Guarded quantity is the GAP between the two runs: same data, same seed, same pick policy, same caps, same scorer, only the player ordering differs. Regenerate with `python -m scripts.check_backtest_baseline --write` and justify the move in the commit message.",
- "recorded": "2026-09-02",
- "git_commit": "8b62a4d",
+ "recorded": "2026-09-19",
+ "git_commit": "4574b35",
  "tolerance": {
   "parity_gap": 0.35,
   "playoff_gap": 12.0,
@@ -19,8 +19,8 @@
   "src/features/vorp.py": "24b592336d71c877",
   "src/features/scoring.py": "0facc9653298e226",
   "src/ingest/history.py": "55552d7e2ea051be",
-  "src/backtest/draft_sim.py": "ab3cffab53a4be62",
-  "src/backtest/walkforward.py": "07b0be93ab42a137",
+  "src/backtest/draft_sim.py": "e69c24d9ef5c3130",
+  "src/backtest/walkforward.py": "13c63741e2cdb466",
   "src/backtest/metrics.py": "89048f92c828d37a"
  },
  "drafts_per_season": 40,
@@ -30,54 +30,54 @@
   "vorp": {
    "seasons": {
     "2022": {
-     "league_rank_by_points": 3.975,
-     "playoff_points": 420.193
+     "league_rank_by_points": 4.0,
+     "playoff_points": 426.239
     },
     "2023": {
-     "league_rank_by_points": 4.45,
-     "playoff_points": 413.298
+     "league_rank_by_points": 4.2,
+     "playoff_points": 415.101
     },
     "2024": {
-     "league_rank_by_points": 4.225,
-     "playoff_points": 447.01
+     "league_rank_by_points": 4.25,
+     "playoff_points": 444.17
     },
     "2025": {
-     "league_rank_by_points": 5.95,
-     "playoff_points": 374.844
+     "league_rank_by_points": 5.45,
+     "playoff_points": 382.293
     }
    },
    "all": {
-    "league_rank_by_points": 4.65,
-    "playoff_points": 413.836,
-    "win_rate": 0.558
+    "league_rank_by_points": 4.475,
+    "playoff_points": 416.951,
+    "win_rate": 0.5652
    },
-   "config_hash": "816f6b0dab7f"
+   "config_hash": "1edfd57a54b6"
   },
   "adp_value": {
    "seasons": {
     "2022": {
-     "league_rank_by_points": 3.9,
-     "playoff_points": 419.335
+     "league_rank_by_points": 4.275,
+     "playoff_points": 419.647
     },
     "2023": {
-     "league_rank_by_points": 4.825,
-     "playoff_points": 388.918
+     "league_rank_by_points": 5.075,
+     "playoff_points": 386.47
     },
     "2024": {
-     "league_rank_by_points": 4.85,
-     "playoff_points": 445.389
+     "league_rank_by_points": 4.9,
+     "playoff_points": 441.011
     },
     "2025": {
-     "league_rank_by_points": 4.8,
-     "playoff_points": 418.627
+     "league_rank_by_points": 4.525,
+     "playoff_points": 421.849
     }
    },
    "all": {
-    "league_rank_by_points": 4.5938,
-    "playoff_points": 418.067,
-    "win_rate": 0.5283
+    "league_rank_by_points": 4.6937,
+    "playoff_points": 417.244,
+    "win_rate": 0.5175
    },
-   "config_hash": "fe2ae790f4e5"
+   "config_hash": "b5da9a565845"
   }
  }
 }

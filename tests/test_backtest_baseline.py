@@ -164,11 +164,12 @@ def test_the_fingerprint_ignores_comments_but_not_code(tmp_path,
 def test_baseline_still_says_what_handoff_says(baseline):
     """HANDOFF.md's finding, asserted rather than remembered.
 
-    As recorded on 2026-09-02 under the shipping config (ECR-only blend,
-    `run_aware` on for both drafters): the board and the raw consensus
-    ordering finish within a tenth of a place of each other, the board
-    wins 2023 and 2024, and 2025 is still the fold it loses — by about a
-    place now rather than three. ADP still has the better playoff points.
+    As recorded on 2026-09-19 under the shipping config (ECR-only blend,
+    `run_aware` on for both drafters, `lookahead_rule: next_exposed`): the
+    board and the raw consensus ordering finish within a quarter of a place
+    of each other, the board wins 2022-2024, and 2025 is still the fold it
+    loses — by about a place now rather than three. ADP still has the
+    better playoff points, by a third of a point.
     If a future edit makes this fixture disagree with that description, the
     description in HANDOFF.md needs rewriting too — this test is the
     reminder, in either direction.
