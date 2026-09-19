@@ -398,6 +398,95 @@ def test_the_report_leads_with_the_unvalidated_warning():
 
 
 # --------------------------------------------------------------------------
+# The brief — status first, so stale inputs can never hide under a lineup
+# --------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from src.ingest import nflverse as nv  # noqa: E402
+
+NOW = datetime(2026, 9, 23, 11, 0, tzinfo=timezone.utc)      # a Wednesday
+
+
+def _fresh(**kw):
+    base = dict(scrape_date="2026-09-23",
+                last_kickoff_utc=NOW + timedelta(days=5),
+                fallbacks=[], week=3, report_week=3, now=NOW)
+    base.update(kw)
+    return report.freshness_issues(**base)
+
+
+def test_live_inputs_raise_no_issues_and_the_brief_says_ok():
+    assert _fresh() == []
+    text = report.brief(week=3, season=2026, issues=[])
+    assert text.splitlines()[0] == "# STATUS: OK — Week 3 (2026)"
+
+
+def test_a_stale_cache_fallback_leads_the_brief():
+    issues = _fresh(fallbacks=[{"name": "ff_rankings_weekly",
+                                "error": "boom", "age_hours": 30.0}])
+    assert issues and issues[0].startswith("STALE CACHE")
+    assert "ff_rankings_weekly" in issues[0] and "30.0h" in issues[0]
+    text = report.brief(week=3, season=2026, issues=issues)
+    assert text.splitlines()[0] == "# STATUS: DEGRADED — Week 3 (2026)"
+    assert text.index("Read this first") < text.index("## Start / sit")
+
+
+def test_rankings_whose_games_have_all_kicked_off_are_stale():
+    """The hard case: the file pulled fine today but ranks last week."""
+    issues = _fresh(last_kickoff_utc=NOW - timedelta(days=1))
+    assert any(i.startswith("STALE RANKINGS") and "kicked off" in i
+               for i in issues)
+
+
+def test_a_feed_that_stopped_scraping_is_stale():
+    assert not [i for i in _fresh(scrape_date="2026-09-21") if "STALE" in i]
+    issues = _fresh(scrape_date="2026-09-20")
+    assert any(i.startswith("STALE RANKINGS") and "3 days ago" in i
+               for i in issues)
+
+
+def test_last_weeks_injury_report_is_a_note_not_a_stale_flag():
+    issues = _fresh(report_week=2)
+    assert len(issues) == 1 and not issues[0].startswith("STALE")
+    text = report.brief(week=3, season=2026, issues=issues)
+    assert text.startswith("# STATUS: OK")
+    assert "Notes:" in text and "Read this first" not in text
+
+
+def test_a_failed_run_produces_a_brief_with_no_recommendations():
+    text = report.brief(week=3, season=2026, issues=[],
+                        failed="2 ingestion problem(s)")
+    assert text.startswith("# STATUS: FAILED")
+    assert "## Start / sit" not in text and "## Waivers" not in text
+
+
+def test_the_brief_never_claims_to_have_submitted_anything():
+    moves = waivers.evaluate(_full_roster(), _players([("Stud", "RB", 24.0)]),
+                             SLOTS, priority_threshold=4.0)
+    text = report.brief(week=3, season=2026, issues=[], moves=moves,
+                        waiver_threshold=4.0)
+    assert "CLAIM candidate" in text and "burns priority" in text
+    assert "nothing is submitted for you" in text
+
+
+def test_a_pull_that_falls_back_to_cache_is_recorded_not_just_printed(tmp_path):
+    nv.reset_fallbacks()
+    good = lambda: pd.DataFrame({"x": [1]})  # noqa: E731
+    nv._cached("thing", good, max_age_hours=1.0, cache_dir=tmp_path)
+
+    def broken():
+        raise RuntimeError("host down")
+    out = nv._cached("thing", broken, max_age_hours=1.0, cache_dir=tmp_path,
+                     refresh=True)
+    assert list(out["x"]) == [1]
+    assert len(nv.FALLBACKS) == 1
+    assert nv.FALLBACKS[0]["name"] == "thing"
+    assert "host down" in nv.FALLBACKS[0]["error"]
+    nv.reset_fallbacks()
+
+
+# --------------------------------------------------------------------------
 # Durability — measured, and deliberately not applied as an adjustment
 # --------------------------------------------------------------------------
 

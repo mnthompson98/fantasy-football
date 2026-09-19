@@ -60,6 +60,16 @@ def _freshness_for(seasons: Sequence[int]) -> float:
     return FRESH_HOURS_STATIC
 
 
+# Every stale-cache fallback this process has taken, oldest first. The printed
+# `[warn]` line scrolls past; an automated caller (the weekly brief) needs to
+# ask afterwards whether anything it just read was yesterday's data.
+FALLBACKS: list[dict] = []
+
+
+def reset_fallbacks() -> None:
+    FALLBACKS.clear()
+
+
 def _cache_path(name: str, cache_dir: Path | str | None = None) -> Path:
     d = Path(cache_dir) if cache_dir is not None else RAW_DIR
     d.mkdir(parents=True, exist_ok=True)
@@ -91,6 +101,8 @@ def _cached(name: str, loader: Callable[[], "object"], *,
             age_h = (time.time() - path.stat().st_mtime) / 3600
             print(f"  [warn] {name}: pull failed ({exc}); "
                   f"using cache aged {age_h:.1f}h")
+            FALLBACKS.append({"name": name, "error": str(exc),
+                              "age_hours": age_h})
             return pd.read_parquet(path)
         raise
 

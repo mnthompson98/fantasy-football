@@ -832,8 +832,34 @@ turn slots). It needs `check_backtest_baseline` and a deliberate re-record.
 
 ### After the draft
 
-4. **Run `weekly_update` for real.** Built and tested against 2025 rosters, but
-   never against a live week. Consider `schedule_weekly --install`.
+4. ~~**Run `weekly_update` for real.**~~ **Done 2026-09-19**, against live
+   2026 week 2: `--check-only --refresh` and the full job both ran clean on
+   Sleeper + nflverse (roster found, week-2 injury report attached, lineup and
+   waiver sections produced, nothing needed fixing). The waiver module was
+   audited against guardrail #7 at the same time: a claim at +3.9 against the
+   4.0 bar is surfaced as a free add and refused as a claim, and `evaluate()`
+   now rejects a `priority_threshold` that does not exceed the stream floor,
+   so `--waiver-threshold 0` can no longer turn "claim" into "any add".
+
+   **The run now also writes a brief** — `outputs/reports/weekNN.brief.md`,
+   copied to `latest.brief.md` and printed last on the terminal — with a
+   `STATUS: OK | DEGRADED | FAILED` line first. DEGRADED means an input was
+   stale: a pull that fell back to cache (`nflverse.FALLBACKS`), a weekly feed
+   whose games have all already kicked off, or one not scraped in 2+ days.
+   This is what a scheduled reader (Claude Cowork, every Wednesday 7 AM)
+   relays; the prompt it runs under is in `docs/cowork_weekly_prompt.md`.
+   `schedule_weekly` (Task Scheduler) is the alternative if Cowork is not
+   running.
+
+   **Timing caveat for that schedule:** this league processes waivers on
+   Wednesday (`waiver_day_of_week: 2`, `waiver_clear_days: 2`). A Wednesday
+   7 AM run lands *after* processing, when the wire is mostly free agents
+   until players lock at their own kickoff — so its "claim" labels describe
+   what a pickup *would* cost once locked, and its free adds are genuinely
+   free right then. To place claims *before* processing, run Tuesday night
+   instead. The module does not read per-player waiver status from Sleeper;
+   that would be the next in-season feature if the distinction starts costing
+   priority.
 5. **Injury-risk feature** — partly done (see below); the predictive half is
    built, a full model is not.
 6. **ML projection model** — *recommended against for now.* It would improve a

@@ -7,6 +7,13 @@
 Reads the live league from `config.current.league_id`, pulls this week's
 FantasyPros projections, and answers the three questions that matter each week.
 
+Two files come out of a full run. `outputs/reports/weekNN.md` is the whole
+report; `outputs/reports/weekNN.brief.md` (also copied to `latest.brief.md`)
+is the short form with a STATUS line first — OK, DEGRADED when any input was
+stale, FAILED when the run refused — followed by only the verdicts. The brief
+is what a scheduled reader relays; it is printed last so it is also the last
+thing on the terminal.
+
 **Everything here is unvalidated.** The draft board was backtested over four
 seasons; these recommendations cannot be, because the weekly ranking feed is a
 live snapshot with no archive (see `src/inseason/projections.py`). Treat the
@@ -148,6 +155,19 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
+    out_dir = ROOT / args.out
+    out_dir.mkdir(parents=True, exist_ok=True)
+    season = int(current.get("season") or nv._current_season())
+    week = args.week if args.week is not None else _current_week(season)
+    stem = f"week{week:02d}" if week else "preseason"
+
+    def _write_brief(text: str) -> Path:
+        path = out_dir / f"{stem}.brief.md"
+        path.write_text(text, encoding="utf-8")
+        (out_dir / "latest.brief.md").write_text(text, encoding="utf-8")
+        return path
+
+    nv.reset_fallbacks()
     print("resolving player identities...")
     cw = build_crosswalk(nv.load_ff_playerids(refresh=args.refresh),
                          get_players(cache_dir=nv.RAW_DIR))
@@ -158,6 +178,9 @@ def main() -> int:
         return 1 if problems else 0
     if problems:
         print("\nrefusing to advise on broken ingestion.", file=sys.stderr)
+        _write_brief(report.brief(
+            week=week, season=season, issues=[],
+            failed=f"{problems} ingestion problem(s); see the check above"))
         return 1
 
     proj = load_weekly_projections(cw, refresh=args.refresh)
@@ -168,18 +191,21 @@ def main() -> int:
     if state.my_roster.empty:
         print(f"\nNo roster found for user {cfg['user']['sleeper_user_id']} in "
               f"league {league_id}. Before the draft this is expected.")
+        _write_brief(report.brief(
+            week=week, season=season, issues=[],
+            failed=f"no roster for user {cfg['user']['sleeper_user_id']} in "
+                   f"league {league_id} (expected before the draft)"))
         return 0
 
     roster = attach_projections(state.my_roster, proj)
 
-    # The week being *decided* is the upcoming one. It used to be inferred
-    # from the latest injury report, which on a Tuesday night is last week's:
-    # the report was titled with the week just played, overwrote that week's
-    # file, and pulled game context for games already over. nflverse's own
-    # calendar says which week is next; the season comes from config so the
-    # 2025-vs-2026 flip in early September cannot move it either.
-    season = int(current.get("season") or nv._current_season())
-    week = args.week if args.week is not None else _current_week(season)
+    # The week being *decided* is the upcoming one (computed above, before
+    # ingestion, so a failed run can still name the week it failed for). It
+    # used to be inferred from the latest injury report, which on a Tuesday
+    # night is last week's: the report was titled with the week just played,
+    # overwrote that week's file, and pulled game context for games already
+    # over. nflverse's own calendar says which week is next; the season comes
+    # from config so the 2025-vs-2026 flip in early September cannot move it.
 
     # The official weekly injury report is the in-season authority. Sleeper's
     # season-long designations (IR, PUP) still gate on top of it — the two
@@ -189,10 +215,10 @@ def main() -> int:
     inj = weekly_report(season, week)
     if inj.empty and week:
         inj = weekly_report(season, None)
+    rep_week = int(inj["report_week"].max()) if not inj.empty else None
     if not inj.empty:
         roster = apply_to_roster(roster, inj)
         flagged = int((roster["concern"] != "clear").sum())
-        rep_week = int(inj["report_week"].max())
         stale = f" (week {rep_week} report; week {week}'s not published yet)" \
             if rep_week != week else ""
         print(f"  injury report: week {week}{stale} · {len(inj)} listed · "
@@ -278,8 +304,6 @@ def main() -> int:
                   f"dropped in {count:,} leagues · owned by "
                   f"{state.owner_of.get(key, '?')}")
 
-    out_dir = ROOT / args.out
-    out_dir.mkdir(parents=True, exist_ok=True)
     md = report.build(
         week=week, season=season, lineup=lineup, calls=calls, holes=holes,
         slots=slots, moves=moves, waiver_threshold=threshold,
@@ -287,9 +311,35 @@ def main() -> int:
         scrape_date=str(proj["scrape_date"].max()) if len(proj) else None,
         league_name=str((cfg.get("current") or {}).get("name") or ""),
     )
-    path = out_dir / (f"week{week:02d}.md" if week else "preseason.md")
+    path = out_dir / f"{stem}.md"
     path.write_text(md, encoding="utf-8")
     print(f"\nreport written: {path.relative_to(ROOT)}")
+
+    # The brief goes last, status first. The weekly feed's kickoff column is
+    # the one check that catches a fresh-looking file ranking a week already
+    # played; it is not carried onto `proj`, so read it off the cached raw
+    # pull (free — same TTL, same file).
+    raw = nv.load_ff_rankings_weekly()
+    last_kickoff = None
+    if "player_game_kickoff_ts" in raw:
+        ts = pd.to_numeric(raw["player_game_kickoff_ts"], errors="coerce").max()
+        if ts == ts:
+            last_kickoff = pd.to_datetime(ts, unit="s", utc=True).to_pydatetime()
+    scraped = str(proj["scrape_date"].max()) if len(proj) else None
+    issues = report.freshness_issues(
+        scrape_date=scraped, last_kickoff_utc=last_kickoff,
+        fallbacks=list(nv.FALLBACKS), week=week, report_week=rep_week,
+    )
+    text = report.brief(
+        week=week, season=season, issues=issues, lineup=lineup, calls=calls,
+        holes=holes, moves=moves, waiver_threshold=threshold, surplus=surplus,
+        roster=roster, scrape_date=scraped,
+        report_path=str(path.relative_to(ROOT)),
+    )
+    bpath = _write_brief(text)
+    print(f"brief written:  {bpath.relative_to(ROOT)}\n")
+    print(f"{'=' * 62}\nBRIEF\n{'=' * 62}")
+    print(text)
 
     return 0
 

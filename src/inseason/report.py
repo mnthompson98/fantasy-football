@@ -146,3 +146,170 @@ def build(*, week: int | None, season: int, lineup: Lineup,
         lines.append("")
 
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# The brief — what an automated reader relays, status first
+# --------------------------------------------------------------------------
+
+# Anything past this and the rankings are not "this week's" in any useful
+# sense: ffverse re-scrapes daily, so two missed days means the feed is stuck.
+STALE_RANKINGS_DAYS = 2
+
+
+def freshness_issues(*, scrape_date: str | None, last_kickoff_utc,
+                     fallbacks: list[dict], week: int | None,
+                     report_week: int | None,
+                     now: datetime | None = None) -> list[str]:
+    """Reasons to distrust this run's inputs, in plain words, worst first.
+
+    An empty list means every input was live. Each string is meant to be
+    read verbatim by whoever (or whatever) relays the brief, so it names the
+    input and the age rather than a code.
+
+    Three distinct failure modes, because they hide differently:
+
+    - A **pull that fell back to cache** printed one `[warn]` line hundreds of
+      lines ago. `nflverse.FALLBACKS` remembers it.
+    - A **feed that pulled fine but has not moved** looks perfectly healthy to
+      the cache. `scrape_date` catches ffverse being stuck; the last kickoff
+      catches the harder case where the file is fresh but ranks a week whose
+      games have already been played.
+    - An **injury report for the wrong week** is expected early in the week
+      and is informational, not an error; it is listed last and without the
+      "stale" label so a reader does not escalate it.
+    """
+    now = now or datetime.now(timezone.utc)
+    issues: list[str] = []
+
+    for fb in fallbacks:
+        issues.append(
+            f"STALE CACHE: {fb['name']} could not be pulled "
+            f"({fb['error']}); used a cached copy aged {fb['age_hours']:.1f}h")
+
+    if last_kickoff_utc is not None and last_kickoff_utc == last_kickoff_utc:
+        if now > last_kickoff_utc:
+            issues.append(
+                f"STALE RANKINGS: every game in the weekly feed has already "
+                f"kicked off (last kickoff {last_kickoff_utc:%Y-%m-%d %H:%M UTC}) "
+                f"— these are last week's rankings")
+
+    if scrape_date:
+        try:
+            scraped = datetime.strptime(str(scrape_date)[:10], "%Y-%m-%d")
+            age_days = (now.date() - scraped.date()).days
+            if age_days > STALE_RANKINGS_DAYS:
+                issues.append(
+                    f"STALE RANKINGS: weekly feed last scraped {scrape_date} "
+                    f"({age_days} days ago)")
+        except ValueError:
+            issues.append(f"weekly feed scrape date unreadable: {scrape_date!r}")
+    else:
+        issues.append("weekly feed carries no scrape date")
+
+    if week and report_week and report_week != week:
+        issues.append(
+            f"injury report is week {report_week}'s; week {week}'s is not "
+            f"published yet (normal before Wednesday afternoon)")
+    return issues
+
+
+def brief(*, week: int | None, season: int, issues: list[str],
+          lineup: Lineup | None = None, calls: list | None = None,
+          holes: list[str] | None = None, moves: list | None = None,
+          waiver_threshold: float | None = None,
+          surplus: pd.DataFrame | None = None,
+          roster: pd.DataFrame | None = None,
+          scrape_date: str | None = None,
+          report_path: str | None = None,
+          failed: str | None = None) -> str:
+    """The short form: status on line one, then only what changes a decision.
+
+    Built for a reader that relays rather than reads — a scheduled agent, or
+    you on a phone. The full report has every starter and every table; this
+    has the verdicts. The status line is first and unconditional so "the
+    inputs were stale" can never be buried under a tidy lineup.
+
+    `failed` short-circuits everything: the brief then says the run refused
+    and why, and nothing else, so a partial result cannot be mistaken for a
+    recommendation.
+    """
+    wk = f"Week {week}" if week else "Preseason"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines: list[str] = []
+
+    if failed:
+        lines += [f"# STATUS: FAILED — {wk} ({season})", "",
+                  f"weekly_update refused to advise: {failed}", "",
+                  f"*Generated {now}.* No recommendations were produced."]
+        return "\n".join(lines)
+
+    stale = [i for i in issues if i.startswith("STALE")]
+    status = "DEGRADED" if stale else "OK"
+    lines += [f"# STATUS: {status} — {wk} ({season})", ""]
+    if issues:
+        lines += [("**Read this first:**" if stale else "Notes:"), ""]
+        lines += [f"- {i}" for i in issues]
+        lines.append("")
+    lines += [f"*Generated {now}. Rankings scraped {scrape_date or 'unknown'}."
+              + (f" Full report: `{report_path}`." if report_path else "")
+              + "*", ""]
+
+    lines += ["## Start / sit", ""]
+    if lineup is not None:
+        lines.append(f"- Projected total **{lineup.points:.1f}**")
+    if holes:
+        lines.append(f"- **UNFILLED: {', '.join(holes)}** — bye or injury; "
+                     f"fill from free agency before kickoff")
+    tight = [c for c in (calls or []) if c.gap < 6][:5]
+    if tight:
+        for c in tight:
+            verdict = "toss-up" if c.tossup else "start"
+            lines.append(
+                f"- {c.slot}: {c.start} ({_fmt(c.start_points)}) over "
+                f"{c.sit} ({_fmt(c.sit_points)}), +{c.gap:.1f} — {verdict}")
+    else:
+        lines.append("- No close calls; the lineup sets itself this week.")
+    hurt = None
+    if roster is not None and "concern" in roster:
+        hurt = roster[roster["concern"].isin(("out", "doubtful", "risky",
+                                              "monitor"))]
+    if hurt is not None and not hurt.empty:
+        names = ", ".join(
+            f"{r.player_name} ({_text(getattr(r, 'concern', ''))})"
+            for r in hurt.itertuples())
+        lines.append(f"- Injury flags on roster: {names}")
+    lines.append("")
+
+    lines += ["## Waivers (rolling priority — nothing is submitted for you)",
+              ""]
+    moves = moves or []
+    claims = [m for m in moves if m.burns_priority]
+    free = [m for m in moves if not m.burns_priority]
+    for m in claims:
+        cost = f", drop {m.drop}" if m.drop else ""
+        lines.append(f"- **CLAIM candidate (burns priority):** {m.add} "
+                     f"({m.position}) {m.net:+.1f} to the lineup{cost}")
+    for m in free[:3]:
+        cost = f", drop {m.drop}" if m.drop else ""
+        lines.append(f"- Free add: {m.add} ({m.position}) "
+                     f"{m.net:+.1f}{cost}")
+    if waiver_threshold is not None:
+        lines.append(f"- Verdict: "
+                     f"{waivers_mod.summarize(moves, threshold=waiver_threshold)}")
+    lines.append("")
+
+    lines += ["## Trade flags", ""]
+    if surplus is not None and not surplus.empty:
+        names = ", ".join(
+            f"{r.player_name} ({r.position} {_fmt(getattr(r, 'projection', None))})"
+            for r in surplus.head(4).itertuples())
+        lines.append(f"- Surplus the lineup does not need this week: {names}")
+    else:
+        lines.append("- Nothing spare; every rostered player is doing work.")
+    lines.append("")
+
+    lines += ["> Unvalidated, like every in-season output here: the weekly "
+              "feed has no archive to score against. Second opinion, not an "
+              "edge."]
+    return "\n".join(lines)
