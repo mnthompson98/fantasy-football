@@ -203,6 +203,45 @@ def test_a_real_difference_maker_does_burn_priority():
     assert moves and moves[0].burns_priority
 
 
+def test_a_claim_just_under_the_bar_is_refused_not_approved_by_default():
+    """Guardrail #7: rolling priority, so the bar is high, not positive.
+
+    The marginal test above sits at the *stream* floor; this one sits a tenth
+    of a point under the *priority* bar, which is where a "round up and claim"
+    default would show. WR at 14.9 displaces WRc (11.0) from the flex for a
+    net of +3.9 against a 4.0 threshold: comfortably a starter, and still not
+    worth dropping to the back of the queue. He must be surfaced as a free add
+    (nothing is dropped silently) but never labelled a claim, and the verdict
+    has to say so in words rather than leave it to the reader.
+    """
+    roster = _full_roster()
+    cands = _players([("Almost", "WR", 14.9)])
+    moves = waivers.evaluate(roster, cands, SLOTS, priority_threshold=4.0)
+
+    assert len(moves) == 1
+    almost = moves[0]
+    assert almost.net == pytest.approx(3.9)
+    assert not almost.burns_priority
+    assert "burns priority" not in almost.describe()
+
+    verdict = waivers.summarize(moves, threshold=4.0)
+    assert "no claim worth your priority" in verdict.lower()
+    assert "clears the bar" not in verdict.lower()
+
+
+def test_a_threshold_that_makes_every_add_a_claim_is_refused():
+    """The bar has to be higher than the stream floor or "claim" means "any
+    add" — reachable from `--waiver-threshold 0` or a config edit, so the
+    module refuses rather than trusting the number it was handed."""
+    roster = _full_roster()
+    cands = _players([("Meh", "WR", 11.5)])
+    with pytest.raises(ValueError, match="must exceed"):
+        waivers.evaluate(roster, cands, SLOTS, priority_threshold=0.0)
+    with pytest.raises(ValueError, match="must exceed"):
+        waivers.evaluate(roster, cands, SLOTS,
+                         priority_threshold=waivers.DEFAULT_STREAM_THRESHOLD)
+
+
 def test_a_player_who_cannot_crack_the_lineup_is_not_suggested_at_all():
     roster = _full_roster()
     cands = _players([("Nobody", "WR", 2.0)])

@@ -111,6 +111,18 @@ def evaluate(roster: pd.DataFrame, candidates: pd.DataFrame,
     "claim" label — i.e. is worth burning priority — if that net clears
     `priority_threshold`.
     """
+    # The bar is high, not positive, and that must hold structurally rather
+    # than by whatever number happens to be in the config or on the command
+    # line. Below the stream floor every surfaced add is a "claim" and the
+    # label stops meaning anything — the rolling-priority mistake this module
+    # exists to avoid.
+    if priority_threshold <= stream_threshold:
+        raise ValueError(
+            f"priority_threshold ({priority_threshold}) must exceed "
+            f"stream_threshold ({stream_threshold}): under rolling waivers a "
+            f"claim costs your place in the queue, so the bar for one has to "
+            f"be higher than the bar for a free add")
+
     if roster.empty or candidates.empty:
         return []
 
