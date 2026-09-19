@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -32,7 +33,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.features.lineup import LineupSlots  # noqa: E402
-from src.inseason import matchup, report, start_sit, trades, waivers  # noqa: E402
+from src.inseason import (  # noqa: E402
+    matchup, report, start_sit, trades, transactions, waivers,
+)
 from src.inseason.projections import (  # noqa: E402
     attach_projections,
     load_weekly_projections,
@@ -145,6 +148,14 @@ def main() -> int:
                          "week, i.e. the upcoming one)")
     ap.add_argument("--out", default="outputs/reports",
                     help="where to write the markdown report")
+    ap.add_argument("--drops-since-hours", type=float, default=72.0,
+                    help="how far back to look for players other teams "
+                         "dropped. Default 72h: from a Wednesday-morning run "
+                         "that reaches Sunday morning, so it holds both "
+                         "kinds — Wednesday's processing drops, still on "
+                         "waivers for waiver_clear_days (2) and so a claim, "
+                         "and Sunday's drops, which have cleared and are "
+                         "free. A 48h window could never show the second.")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
@@ -276,6 +287,49 @@ def main() -> int:
         print(move.describe())
     print(f"\n  {waivers.summarize(moves, threshold=threshold)}")
 
+    # What the rest of the league just dropped. These players are already in
+    # `available` and were already evaluated above; this is the same
+    # evaluation shown separately, because "somebody cut him this week" is
+    # the freshest fact on the wire and because for two days after the drop
+    # he is a claim, not a free add. See src/inseason/transactions.py.
+    print(f"\n{'=' * 62}\nDROPPED THIS WEEK  (by other teams, last "
+          f"{args.drops_since_hours:.0f}h)\n{'=' * 62}")
+    since = datetime.now(timezone.utc) - timedelta(hours=args.drops_since_hours)
+    legs = [week, week - 1] if week else [1]
+    cut = transactions.recent_drops(
+        league_id, legs, cw, since=since,
+        waiver_clear_days=int(state.settings.get("waiver_clear_days") or 2),
+        owner_names=state.owner_by_roster_id, my_roster_id=state.my_roster_id,
+        still_rostered=state.all_rostered,
+    )
+    if cut.empty:
+        print("  Nobody dropped anyone in the window.")
+        drops = cut
+    else:
+        # Evaluate exactly these players, through the same function as the
+        # section above, so the two can never disagree about one of them.
+        cands = universe[universe["player_key"].isin(cut["player_key"])]
+        unranked = cut[~cut["player_key"].isin(universe["player_key"])]
+        drop_moves = waivers.evaluate(
+            roster, cands, slots, priority_threshold=threshold,
+            stream_threshold=-1e9,     # keep every one; the table says "no"
+            roster_size=int(cfg["verified"].get("roster_size", 16)),
+            trending=trending, top_n=len(cut),
+        ) if not cands.empty else []
+        drops = transactions.annotate(
+            cut, drop_moves,
+            stream_threshold=waivers.DEFAULT_STREAM_THRESHOLD)
+        for row in drops.itertuples(index=False):
+            print(transactions.describe(row))
+        if not unranked.empty:
+            print(f"\n  {len(unranked)} dropped player(s) are not in this "
+                  f"week's rankings and cannot be valued: "
+                  f"{', '.join(unranked['player_name'].astype(str))}")
+        worth = drops[drops["worth_it"]]
+        print(f"\n  {len(worth)} of {len(drops)} worth picking up"
+              + (f": {', '.join(worth['player_name'].astype(str))}"
+                 if len(worth) else "."))
+
     print(f"\n{'=' * 62}\nTRADE BAIT  (costs your lineup nothing)\n{'=' * 62}")
     surplus = trades.find_surplus(roster, slots)
     if surplus.empty:
@@ -307,7 +361,7 @@ def main() -> int:
     md = report.build(
         week=week, season=season, lineup=lineup, calls=calls, holes=holes,
         slots=slots, moves=moves, waiver_threshold=threshold,
-        surplus=surplus, roster=roster,
+        surplus=surplus, roster=roster, drops=drops,
         scrape_date=str(proj["scrape_date"].max()) if len(proj) else None,
         league_name=str((cfg.get("current") or {}).get("name") or ""),
     )
@@ -333,7 +387,7 @@ def main() -> int:
     text = report.brief(
         week=week, season=season, issues=issues, lineup=lineup, calls=calls,
         holes=holes, moves=moves, waiver_threshold=threshold, surplus=surplus,
-        roster=roster, scrape_date=scraped,
+        roster=roster, drops=drops, scrape_date=scraped,
         report_path=str(path.relative_to(ROOT)),
     )
     bpath = _write_brief(text)

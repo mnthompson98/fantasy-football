@@ -62,12 +62,10 @@ def _freshness_for(seasons: Sequence[int]) -> float:
 
 # Every stale-cache fallback this process has taken, oldest first. The printed
 # `[warn]` line scrolls past; an automated caller (the weekly brief) needs to
-# ask afterwards whether anything it just read was yesterday's data.
-FALLBACKS: list[dict] = []
-
-
-def reset_fallbacks() -> None:
-    FALLBACKS.clear()
+# ask afterwards whether anything it just read was yesterday's data. Shared
+# with the Sleeper client through `ingest.freshness`; re-exported here because
+# this is where callers first looked for it.
+from .freshness import FALLBACKS, reset as reset_fallbacks  # noqa: E402,F401
 
 
 def _cache_path(name: str, cache_dir: Path | str | None = None) -> Path:
@@ -102,7 +100,7 @@ def _cached(name: str, loader: Callable[[], "object"], *,
             print(f"  [warn] {name}: pull failed ({exc}); "
                   f"using cache aged {age_h:.1f}h")
             FALLBACKS.append({"name": name, "error": str(exc),
-                              "age_hours": age_h})
+                              "age_hours": age_h})  # via ingest.freshness
             return pd.read_parquet(path)
         raise
 

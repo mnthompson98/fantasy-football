@@ -183,6 +183,8 @@ def get_players(sport: str = "nfl", cache_dir: Path | None = None,
             age_h = (time.time() - cache.stat().st_mtime) / 3600
             print(f"  [warn] sleeper players: pull failed ({exc}); using "
                   f"cache aged {age_h:.1f}h")
+            from .freshness import record
+            record("sleeper_players", str(exc), age_h)
             return json.loads(cache.read_text(encoding="utf-8"))
         raise
 

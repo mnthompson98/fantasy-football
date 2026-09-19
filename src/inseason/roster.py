@@ -29,6 +29,8 @@ class LeagueState:
     owner_of: dict = field(default_factory=dict)   # player_key -> display name
     my_roster_id: int | None = None
     teams: int = 10
+    owner_by_roster_id: dict = field(default_factory=dict)  # roster_id -> name
+    settings: dict = field(default_factory=dict)            # league settings
 
     def free_agents(self, universe: pd.DataFrame) -> pd.DataFrame:
         """Everyone in `universe` that nobody in the league rosters."""
@@ -67,12 +69,14 @@ def load_league_state(league_id: str, cw, *, user_id: str) -> LeagueState:
 
     all_rostered: set = set()
     owner_of: dict = {}
+    owner_by_roster_id: dict = {}
     mine: list[str] = []
     my_roster_id = None
 
     for r in rosters:
         owner = r.get("owner_id")
         name = users.get(owner, owner)
+        owner_by_roster_id[r.get("roster_id")] = name
         # Sleeper's `players` is every rostered player; `starters` is the
         # current lineup. We want the whole roster, bench included.
         sleeper_ids = r.get("players") or []
@@ -93,4 +97,6 @@ def load_league_state(league_id: str, cw, *, user_id: str) -> LeagueState:
         owner_of=owner_of,
         my_roster_id=my_roster_id,
         teams=int(league.get("total_rosters") or len(rosters) or 10),
+        owner_by_roster_id=owner_by_roster_id,
+        settings=dict(league.get("settings") or {}),
     )
